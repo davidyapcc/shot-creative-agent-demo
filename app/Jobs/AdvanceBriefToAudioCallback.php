@@ -8,7 +8,7 @@ use App\Enums\BriefState;
 use App\Models\Brief;
 use Illuminate\Bus\Batch;
 
-class AdvanceBriefToAudioJob
+class AdvanceBriefToAudioCallback
 {
   public function __construct(
     public readonly int $briefId,

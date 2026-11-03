@@ -53,7 +53,7 @@ class RenderShotsJob implements ShouldQueue
 
     Bus::batch($pollJobs)
       ->name("render-brief-{$brief->id}")
-      ->then(new AdvanceBriefToAudioJob($brief->id))
+      ->then(new AdvanceBriefToAudioCallback($brief->id))
       ->catch(new FailBriefOnBatchFailureCallback($brief->id))
       ->dispatch();
   }

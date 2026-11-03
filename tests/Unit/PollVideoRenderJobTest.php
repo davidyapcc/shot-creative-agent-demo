@@ -11,7 +11,7 @@ use App\DTOs\VideoRenderResult;
 use App\Enums\BriefState;
 use App\Enums\JudgementVerdict;
 use App\Enums\ShotState;
-use App\Jobs\AdvanceBriefToAudioJob;
+use App\Jobs\AdvanceBriefToAudioCallback;
 use App\Jobs\GenerateAudioJob;
 use App\Jobs\JudgeVideoJob;
 use App\Jobs\PollVideoRenderJob;
@@ -158,6 +158,8 @@ class PollVideoRenderJobTest extends TestCase
 
   public function test_poll_job_fails_immediately_when_provider_reports_failure(): void
   {
+    config(['queue.default' => 'database']);
+
     $brief = Brief::create([
       'prompt' => '15s product teaser',
       'state' => BriefState::Rendering,
@@ -175,13 +177,95 @@ class PollVideoRenderJobTest extends TestCase
       ->method('poll')
       ->with('failed-render-id')
       ->willReturn(VideoRenderResult::failed('CUDA out of memory'));
+    $this->app->instance(VideoProviderInterface::class, $provider);
 
-    $job = new PollVideoRenderJob($shot->id, 'failed-render-id', $brief->id);
-    $job->withFakeQueueInteractions();
+    Queue::push(new PollVideoRenderJob($shot->id, 'failed-render-id', $brief->id));
 
-    $job->handle($provider);
+    Artisan::call('queue:work', ['--once' => true]);
 
-    $this->assertTrue($job->job->hasFailed());
+    $this->assertSame(ShotState::Failed, $shot->refresh()->state);
+    $this->assertSame(BriefState::Failed, $brief->refresh()->state);
+  }
+
+  public function test_poll_job_fails_brief_when_retry_until_deadline_exceeded(): void
+  {
+    config(['queue.default' => 'database']);
+
+    $brief = Brief::create([
+      'prompt' => '15s product teaser',
+      'state' => BriefState::Rendering,
+    ]);
+
+    $shot = Shot::create([
+      'brief_id' => $brief->id,
+      'sequence' => 1,
+      'prompt' => 'Shot 1 prompt',
+      'state' => ShotState::GeneratingVideo,
+    ]);
+
+    $provider = $this->createMock(VideoProviderInterface::class);
+    $provider->expects($this->once())
+      ->method('poll')
+      ->with('timeout-render-id')
+      ->willReturn(VideoRenderResult::pending());
+    $this->app->instance(VideoProviderInterface::class, $provider);
+
+    $job = new PollVideoRenderJob($shot->id, 'timeout-render-id', $brief->id);
+    $this->assertSame(10, (int) now()->diffInMinutes($job->retryUntil()));
+
+    Queue::push($job);
+
+    // Initial attempt releases with 10s delay
+    Artisan::call('queue:work', ['--once' => true]);
+    $this->assertSame(ShotState::GeneratingVideo, $shot->refresh()->state);
+
+    // Fast-forward past the 10-minute retryUntil deadline
+    $this->travel(11)->minutes();
+
+    // Next worker pass: deadline exceeded, worker marks job failed and runs failed() callback
+    Artisan::call('queue:work', ['--once' => true]);
+
+    $this->assertSame(ShotState::Failed, $shot->refresh()->state);
+    $this->assertSame(BriefState::Failed, $brief->refresh()->state);
+  }
+
+  public function test_poll_job_retries_unexpected_exceptions_up_to_max_exceptions_and_fails_brief(): void
+  {
+    config(['queue.default' => 'database']);
+
+    $brief = Brief::create([
+      'prompt' => '15s product teaser',
+      'state' => BriefState::Rendering,
+    ]);
+
+    $shot = Shot::create([
+      'brief_id' => $brief->id,
+      'sequence' => 1,
+      'prompt' => 'Shot 1 prompt',
+      'state' => ShotState::GeneratingVideo,
+    ]);
+
+    $provider = $this->createMock(VideoProviderInterface::class);
+    $provider->expects($this->exactly(3))
+      ->method('poll')
+      ->willThrowException(new \RuntimeException('Transient provider outage'));
+    $this->app->instance(VideoProviderInterface::class, $provider);
+
+    Queue::push(new PollVideoRenderJob($shot->id, 'retry-exception-id', $brief->id));
+
+    // Attempt 1: failure caught, job released with backoff
+    Artisan::call('queue:work', ['--once' => true]);
+    $this->assertSame(ShotState::GeneratingVideo, $shot->refresh()->state);
+
+    // Attempt 2: failure caught, job released with backoff
+    $this->travel(11)->seconds();
+    Artisan::call('queue:work', ['--once' => true]);
+    $this->assertSame(ShotState::GeneratingVideo, $shot->refresh()->state);
+
+    // Attempt 3: 3rd exception reaches maxExceptions = 3 and fails permanently
+    $this->travel(11)->seconds();
+    Artisan::call('queue:work', ['--once' => true]);
+
     $this->assertSame(ShotState::Failed, $shot->refresh()->state);
     $this->assertSame(BriefState::Failed, $brief->refresh()->state);
   }
@@ -267,7 +351,7 @@ class PollVideoRenderJobTest extends TestCase
     $this->assertSame(BriefState::Failed, $brief->refresh()->state);
   }
 
-  public function test_advance_brief_to_audio_job_ignores_cancelled_batch(): void
+  public function test_advance_brief_to_audio_callback_ignores_cancelled_batch(): void
   {
     Queue::fake([GenerateAudioJob::class]);
 
@@ -276,7 +360,7 @@ class PollVideoRenderJobTest extends TestCase
       'state' => BriefState::Rendering,
     ]);
 
-    $callback = new AdvanceBriefToAudioJob($brief->id);
+    $callback = new AdvanceBriefToAudioCallback($brief->id);
     $batch = $this->createMock(Batch::class);
     $batch->expects($this->once())->method('cancelled')->willReturn(true);
 

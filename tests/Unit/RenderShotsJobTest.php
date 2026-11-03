@@ -7,7 +7,7 @@ namespace Tests\Unit;
 use App\Contracts\VideoProviderInterface;
 use App\Enums\BriefState;
 use App\Enums\ShotState;
-use App\Jobs\AdvanceBriefToAudioJob;
+use App\Jobs\AdvanceBriefToAudioCallback;
 use App\Jobs\FailBriefOnBatchFailureCallback;
 use App\Jobs\GenerateAudioJob;
 use App\Jobs\RenderShotsJob;
@@ -81,7 +81,7 @@ class RenderShotsJobTest extends TestCase
       'state' => BriefState::Rendering,
     ]);
 
-    $callback = new AdvanceBriefToAudioJob($brief->id);
+    $callback = new AdvanceBriefToAudioCallback($brief->id);
     $batch = $this->createMock(\Illuminate\Bus\Batch::class);
 
     $callback($batch);
@@ -99,7 +99,7 @@ class RenderShotsJobTest extends TestCase
       'state' => BriefState::Failed,
     ]);
 
-    $callback = new AdvanceBriefToAudioJob($brief->id);
+    $callback = new AdvanceBriefToAudioCallback($brief->id);
     $batch = $this->createMock(\Illuminate\Bus\Batch::class);
 
     $callback($batch);

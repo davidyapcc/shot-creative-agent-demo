@@ -75,11 +75,8 @@ class PollVideoRenderJob implements ShouldQueue
 
     if ($result->isFailed())
     {
-      $exception = new RuntimeException('Video render failed: ' . ($result->error ?? 'unknown error'));
-      $shot = Shot::with('brief')->find($this->shotId);
-      $shot?->brief?->failWithInFlightShots();
       $this->batch()?->cancel();
-      $this->fail($exception);
+      $this->fail(new RuntimeException('Video render failed: ' . ($result->error ?? 'unknown error')));
 
       return;
     }
