@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Contracts\AgentInterface;
+use App\Contracts\ImageProviderInterface;
+use App\Contracts\JudgeInterface;
+use App\Contracts\VideoProviderInterface;
 use App\Enums\BriefState;
 use App\Events\BriefStateChanged;
 use App\Enums\ShotState;
@@ -98,8 +101,10 @@ class WalkingSkeletonTest extends TestCase
     Queue::assertPushed(ProcessKeyframesJob::class);
 
     // Stage 2: Keyframes
+    $imageProvider = app(ImageProviderInterface::class);
+    $judge = app(JudgeInterface::class);
     $keyframesJob = new ProcessKeyframesJob($brief->id);
-    $keyframesJob->handle();
+    $keyframesJob->handle($imageProvider, $judge);
 
     $brief->refresh();
     $this->assertSame(BriefState::Rendering, $brief->state);
@@ -107,8 +112,9 @@ class WalkingSkeletonTest extends TestCase
     Queue::assertPushed(RenderShotsJob::class);
 
     // Stage 3: Rendering
+    $videoProvider = app(VideoProviderInterface::class);
     $renderJob = new RenderShotsJob($brief->id);
-    $renderJob->handle();
+    $renderJob->handle($videoProvider);
 
     $brief->refresh();
     $this->assertSame(BriefState::Audio, $brief->state);

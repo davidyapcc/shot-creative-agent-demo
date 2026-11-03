@@ -6,22 +6,36 @@ namespace App\Services\Providers;
 
 use App\Contracts\VideoProviderInterface;
 use App\DTOs\VideoRenderResult;
+use App\Enums\VideoRenderStatus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 
 class FfmpegMotionVideoProvider implements VideoProviderInterface
 {
-  public function submit(string $prompt, string $keyframePath, array $options = []): string
+  private const VIDEO_DURATION_SECONDS = '2';
+  private const TARGET_SCALE = 'scale=640:360';
+  private const ZOOMPAN_FILTER = "scale=640:360,zoompan=z='min(zoom+0.0015,1.2)':d=50:s=640x360";
+  private const CACHE_TTL_SECONDS = 3600;
+  private const FFMPEG_TIMEOUT_SECONDS = 15;
+
+  public function submit(string $prompt, string $keyframePath): string
   {
+    if (!Storage::disk('s3')->exists($keyframePath))
+    {
+      throw new InvalidArgumentException("Keyframe not found at S3 path [{$keyframePath}].");
+    }
+
     $renderId = 'ffmpeg_render_' . Str::random(16);
 
     Cache::put("ffmpeg_motion_{$renderId}", [
       'keyframe_path' => $keyframePath,
       'prompt' => $prompt,
-      'status' => 'pending',
-    ], 3600);
+      'poll_count' => 0,
+      'status' => VideoRenderStatus::Pending->value,
+    ], self::CACHE_TTL_SECONDS);
 
     return $renderId;
   }
@@ -35,25 +49,27 @@ class FfmpegMotionVideoProvider implements VideoProviderInterface
       return VideoRenderResult::failed("Render ID [{$renderId}] not found.");
     }
 
-    $keyframePath = $cached['keyframe_path'] ?? '';
+    $pollCount = (int) ($cached['poll_count'] ?? 0);
 
-    // Retrieve image content from s3 or local disk
-    $imageBytes = null;
-    if (Storage::disk('s3')->exists($keyframePath))
+    if ($pollCount === 0)
     {
-      $imageBytes = Storage::disk('s3')->get($keyframePath);
-    }
-    elseif (file_exists($keyframePath))
-    {
-      $imageBytes = file_get_contents($keyframePath);
+      $cached['poll_count'] = 1;
+      Cache::put("ffmpeg_motion_{$renderId}", $cached, self::CACHE_TTL_SECONDS);
+
+      return VideoRenderResult::pending();
     }
 
-    if ($imageBytes === null || $imageBytes === '')
-    {
-      // Fallback: use replay video bytes if keyframe not found
-      $replay = new ReplayVideoProvider(pendingPolls: 0);
+    $keyframePath = (string) ($cached['keyframe_path'] ?? '');
+    $imageBytes = (string) Storage::disk('s3')->get($keyframePath);
 
-      return $replay->poll($renderId);
+    return $this->transcodeImageToVideo($imageBytes);
+  }
+
+  private function transcodeImageToVideo(string $imageBytes): VideoRenderResult
+  {
+    if (@getimagesizefromstring($imageBytes) === false)
+    {
+      return VideoRenderResult::failed('Invalid or corrupt keyframe image data.');
     }
 
     $tempImage = tempnam(sys_get_temp_dir(), 'kp_') . '.png';
@@ -61,34 +77,46 @@ class FfmpegMotionVideoProvider implements VideoProviderInterface
 
     file_put_contents($tempImage, $imageBytes);
 
-    $process = Process::run([
+    $process = Process::timeout(self::FFMPEG_TIMEOUT_SECONDS)->run([
       'ffmpeg',
       '-y',
       '-loop', '1',
       '-i', $tempImage,
       '-c:v', 'libx264',
-      '-t', '2',
+      '-t', self::VIDEO_DURATION_SECONDS,
       '-pix_fmt', 'yuv420p',
-      '-vf', "scale=640:360,zoompan=z='min(zoom+0.0015,1.2)':d=50:s=640x360",
+      '-vf', self::ZOOMPAN_FILTER,
       $tempVideo,
     ]);
 
     $videoBytes = '';
-    if ($process->successful() && file_exists($tempVideo))
+    $success = $process->successful() && file_exists($tempVideo);
+
+    if ($success)
     {
       $videoBytes = (string) file_get_contents($tempVideo);
     }
 
-    @unlink($tempImage);
-    @unlink($tempVideo);
+    $this->cleanupTempFiles($tempImage, $tempVideo);
 
-    if ($videoBytes === '')
+    if (!$success || $videoBytes === '')
     {
-      $replay = new ReplayVideoProvider(pendingPolls: 0);
-
-      return $replay->poll($renderId);
+      return VideoRenderResult::failed('FFmpeg motion generation failed: ' . $process->errorOutput());
     }
 
     return VideoRenderResult::completed($videoBytes);
+  }
+
+  private function cleanupTempFiles(string $tempImage, string $tempVideo): void
+  {
+    if (file_exists($tempImage))
+    {
+      unlink($tempImage);
+    }
+
+    if (file_exists($tempVideo))
+    {
+      unlink($tempVideo);
+    }
   }
 }

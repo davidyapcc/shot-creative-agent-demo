@@ -4,12 +4,11 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
-use App\Contracts\JudgeInterface;
 use App\Contracts\VideoProviderInterface;
 use App\Enums\ShotState;
-use App\Models\Judgement;
 use App\Models\Shot;
 use App\Traits\FailsBriefOnJobFailure;
+use DateTimeInterface;
 use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -22,26 +21,34 @@ class PollVideoRenderJob implements ShouldQueue
   use FailsBriefOnJobFailure;
   use Queueable;
 
+  public const POLL_DELAY_SECONDS = 10;
+  public const MAX_POLL_MINUTES = 10;
+
+  /**
+   * The number of times the job may be attempted.
+   * 0 allows multiple self-releases up to retryUntil().
+   */
+  public int $tries = 0;
+
   public function __construct(
     public readonly int $shotId,
     public readonly string $renderId,
-    public ?int $briefId = null,
+    public readonly int $briefId,
   )
   {
     $this->onQueue('poll');
-
-    if ($this->briefId === null)
-    {
-      $shot = Shot::find($this->shotId);
-      $this->briefId = $shot?->brief_id;
-    }
   }
 
-  public function handle(?VideoProviderInterface $videoProvider = null, ?JudgeInterface $judge = null): void
+  /**
+   * Determine the time at which the job should timeout.
+   */
+  public function retryUntil(): DateTimeInterface
   {
-    $videoProvider ??= app(VideoProviderInterface::class);
-    $judge ??= app(JudgeInterface::class);
+    return now()->addMinutes(self::MAX_POLL_MINUTES);
+  }
 
+  public function handle(VideoProviderInterface $videoProvider): void
+  {
     if ($this->batch()?->cancelled())
     {
       return;
@@ -51,7 +58,7 @@ class PollVideoRenderJob implements ShouldQueue
 
     if ($result->isPending())
     {
-      $this->release(10);
+      $this->release(self::POLL_DELAY_SECONDS);
 
       return;
     }
@@ -73,17 +80,15 @@ class PollVideoRenderJob implements ShouldQueue
 
     $shot->transitionTo(ShotState::JudgingVideo);
 
-    $verdict = $judge->judgeVideo($videoPath, $shot->prompt, $shot->brief?->style_anchor);
+    $judgeJob = new JudgeVideoJob($shot->id, $shot->brief_id);
 
-    Judgement::create([
-      'shot_id' => $shot->id,
-      'stage' => 'video',
-      'scores' => $verdict->scores,
-      'hard_fail_tags' => $verdict->hardFailTags,
-      'reason' => $verdict->reason,
-      'verdict' => $verdict->verdict(),
-    ]);
-
-    $shot->transitionTo(ShotState::Done);
+    if ($this->batch() !== null)
+    {
+      $this->batch()->add([$judgeJob]);
+    }
+    else
+    {
+      dispatch($judgeJob);
+    }
   }
 }

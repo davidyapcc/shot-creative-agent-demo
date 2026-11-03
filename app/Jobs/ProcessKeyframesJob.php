@@ -7,6 +7,7 @@ namespace App\Jobs;
 use App\Contracts\ImageProviderInterface;
 use App\Contracts\JudgeInterface;
 use App\Enums\BriefState;
+use App\Enums\JudgementStage;
 use App\Enums\ShotState;
 use App\Models\Brief;
 use App\Models\Judgement;
@@ -27,12 +28,11 @@ class ProcessKeyframesJob implements ShouldQueue
     $this->onQueue('generate');
   }
 
-  public function handle(?ImageProviderInterface $imageProvider = null, ?JudgeInterface $judge = null): void
+  public function handle(ImageProviderInterface $imageProvider, JudgeInterface $judge): void
   {
-    $imageProvider ??= app(ImageProviderInterface::class);
-    $judge ??= app(JudgeInterface::class);
-
     $brief = Brief::with('shots')->findOrFail($this->briefId);
+
+    $hasFailedShot = false;
 
     foreach ($brief->shots as $shot)
     {
@@ -51,14 +51,20 @@ class ProcessKeyframesJob implements ShouldQueue
 
       $verdict = $judge->judgeImage($keyframePath, $shot->prompt, $brief->style_anchor);
 
-      Judgement::create([
-        'shot_id' => $shot->id,
-        'stage' => 'image',
-        'scores' => $verdict->scores,
-        'hard_fail_tags' => $verdict->hardFailTags,
-        'reason' => $verdict->reason,
-        'verdict' => $verdict->verdict(),
-      ]);
+      Judgement::create($verdict->toModelAttributes($shot->id, JudgementStage::Image));
+
+      if ($verdict->isFail())
+      {
+        $shot->transitionTo(ShotState::Failed);
+        $hasFailedShot = true;
+      }
+    }
+
+    if ($hasFailedShot)
+    {
+      $brief->transitionTo(BriefState::Failed);
+
+      return;
     }
 
     $brief->transitionTo(BriefState::Rendering);

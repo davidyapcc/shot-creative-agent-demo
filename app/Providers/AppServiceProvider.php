@@ -49,12 +49,12 @@ class AppServiceProvider extends ServiceProvider
     {
       $provider = config('creative.video', 'replay');
 
-      $pendingPolls = config('creative.replay_pending_polls') ?? ($this->app->runningUnitTests() ? 0 : 1);
-
       return match ($provider)
       {
-        'replay' => new ReplayVideoProvider(pendingPolls: (int) $pendingPolls),
-        'ffmpeg_motion', 'ffmpeg-motion' => new FfmpegMotionVideoProvider(),
+        'replay' => new ReplayVideoProvider(
+          pendingPolls: (int) config('creative.replay_pending_polls', 1),
+        ),
+        'ffmpeg_motion' => new FfmpegMotionVideoProvider(),
         default => throw new InvalidArgumentException("Unsupported video provider [{$provider}]."),
       };
     });

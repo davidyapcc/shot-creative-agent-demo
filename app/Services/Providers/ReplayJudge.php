@@ -6,6 +6,7 @@ namespace App\Services\Providers;
 
 use App\Contracts\JudgeInterface;
 use App\DTOs\JudgementResult;
+use App\Enums\JudgementVerdict;
 
 class ReplayJudge implements JudgeInterface
 {
@@ -19,7 +20,7 @@ class ReplayJudge implements JudgeInterface
       ],
       hardFailTags: [],
       reason: 'Replay verdict: image adheres to prompt and passes all rubric dimensions.',
-      verdict: 'pass',
+      verdict: JudgementVerdict::Pass,
     );
   }
 
@@ -34,7 +35,7 @@ class ReplayJudge implements JudgeInterface
       ],
       hardFailTags: [],
       reason: 'Replay verdict: video adheres to prompt with no temporal flicker.',
-      verdict: 'pass',
+      verdict: JudgementVerdict::Pass,
     );
   }
 }

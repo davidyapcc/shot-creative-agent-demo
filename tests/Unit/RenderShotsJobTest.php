@@ -88,4 +88,22 @@ class RenderShotsJobTest extends TestCase
     $this->assertSame(BriefState::Audio, $brief->refresh()->state);
     Queue::assertPushed(GenerateAudioJob::class, fn (GenerateAudioJob $j) => $j->briefId === $brief->id);
   }
+
+  public function test_advance_brief_to_audio_skips_when_brief_not_in_rendering(): void
+  {
+    Queue::fake([GenerateAudioJob::class]);
+
+    $brief = Brief::create([
+      'prompt' => '15s product teaser',
+      'state' => BriefState::Failed,
+    ]);
+
+    $callback = new AdvanceBriefToAudioJob($brief->id);
+    $batch = $this->createMock(\Illuminate\Bus\Batch::class);
+
+    $callback($batch);
+
+    $this->assertSame(BriefState::Failed, $brief->refresh()->state);
+    Queue::assertNothingPushed();
+  }
 }

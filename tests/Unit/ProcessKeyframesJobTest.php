@@ -6,7 +6,9 @@ namespace Tests\Unit;
 
 use App\Contracts\ImageProviderInterface;
 use App\Contracts\JudgeInterface;
+use App\DTOs\JudgementResult;
 use App\Enums\BriefState;
+use App\Enums\JudgementVerdict;
 use App\Enums\ShotState;
 use App\Jobs\ProcessKeyframesJob;
 use App\Jobs\RenderShotsJob;
@@ -83,5 +85,50 @@ class ProcessKeyframesJobTest extends TestCase
     // Brief transitioned to Rendering and dispatched RenderShotsJob
     $this->assertSame(BriefState::Rendering, $brief->state);
     Queue::assertPushed(RenderShotsJob::class, fn (RenderShotsJob $j) => $j->briefId === $brief->id);
+  }
+
+  public function test_process_keyframes_fails_brief_when_judge_verdict_fails(): void
+  {
+    Queue::fake([RenderShotsJob::class]);
+    Storage::fake('s3');
+
+    $brief = Brief::create([
+      'prompt' => '15s product teaser, rainy Tokyo, neon',
+      'state' => BriefState::Keyframes,
+      'style_anchor' => 'cinematic cyberpunk neon',
+    ]);
+
+    $shot = Shot::create([
+      'brief_id' => $brief->id,
+      'sequence' => 1,
+      'prompt' => 'Shot 1: Neon alley',
+      'state' => ShotState::Pending,
+    ]);
+
+    $imageProvider = app(ImageProviderInterface::class);
+
+    $failingJudge = $this->createMock(JudgeInterface::class);
+    $failingJudge->expects($this->once())
+      ->method('judgeImage')
+      ->willReturn(new JudgementResult(
+        scores: [
+          'prompt_adherence' => 2,
+          'anatomy' => 1,
+          'object_integrity' => 2,
+        ],
+        hardFailTags: ['anatomy'],
+        reason: 'Severe anatomy distortion',
+        verdict: JudgementVerdict::Fail,
+      ));
+
+    $job = new ProcessKeyframesJob($brief->id);
+    $job->handle($imageProvider, $failingJudge);
+
+    $brief->refresh();
+    $shot->refresh();
+
+    $this->assertSame(ShotState::Failed, $shot->state);
+    $this->assertSame(BriefState::Failed, $brief->state);
+    Queue::assertNothingPushed();
   }
 }

@@ -9,14 +9,32 @@ use App\Contracts\VideoProviderInterface;
 use App\DTOs\JudgementResult;
 use App\DTOs\VideoRenderResult;
 use App\Enums\BriefState;
+use App\Enums\JudgementVerdict;
 use App\Enums\ShotState;
+use App\Jobs\JudgeVideoJob;
 use App\Jobs\PollVideoRenderJob;
 use App\Models\Brief;
 use App\Models\Judgement;
 use App\Models\Shot;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
+
+class DummyWorkerFollowUpJob implements ShouldQueue
+{
+  use Queueable;
+
+  public static bool $executed = false;
+
+  public function handle(): void
+  {
+    self::$executed = true;
+  }
+}
 
 class PollVideoRenderJobTest extends TestCase
 {
@@ -42,26 +60,69 @@ class PollVideoRenderJobTest extends TestCase
       ->with('test-render-id')
       ->willReturn(VideoRenderResult::pending());
 
-    $judge = $this->createMock(JudgeInterface::class);
-    $judge->expects($this->never())->method('judgeVideo');
-
-    $job = new PollVideoRenderJob($shot->id, 'test-render-id');
+    $job = new PollVideoRenderJob($shot->id, 'test-render-id', $brief->id);
     $job->withFakeQueueInteractions();
 
-    $startTime = microtime(true);
-    $job->handle($provider, $judge);
-    $elapsed = microtime(true) - $startTime;
+    $job->handle($provider);
 
-    // Worker must not sleep (should finish in well under 1 second)
-    $this->assertLessThan(0.5, $elapsed, 'Poll job blocked/slept instead of releasing immediately.');
     $this->assertTrue($job->job->isReleased(), 'Job should be released back to queue.');
-    $this->assertSame(10, $job->job->releaseDelay);
+    $this->assertSame(PollVideoRenderJob::POLL_DELAY_SECONDS, $job->job->releaseDelay);
     $this->assertSame(ShotState::GeneratingVideo, $shot->refresh()->state);
   }
 
-  public function test_poll_job_completes_render_stores_to_s3_and_judges(): void
+  public function test_pending_render_does_not_block_worker_from_processing_subsequent_jobs(): void
+  {
+    config(['queue.default' => 'database']);
+    DummyWorkerFollowUpJob::$executed = false;
+
+    $brief = Brief::create([
+      'prompt' => '15s product teaser',
+      'state' => BriefState::Rendering,
+    ]);
+
+    $shot = Shot::create([
+      'brief_id' => $brief->id,
+      'sequence' => 1,
+      'prompt' => 'Shot 1 prompt',
+      'state' => ShotState::GeneratingVideo,
+    ]);
+
+    $mockProvider = $this->createMock(VideoProviderInterface::class);
+    $mockProvider->expects($this->exactly(2))
+      ->method('poll')
+      ->willReturnOnConsecutiveCalls(
+        VideoRenderResult::pending(),
+        VideoRenderResult::completed('TEST_MP4_BYTES'),
+      );
+    $this->app->instance(VideoProviderInterface::class, $mockProvider);
+
+    // Queue the poll job first, followed immediately by another job
+    Queue::push(new PollVideoRenderJob($shot->id, 'render-pending-test', $brief->id));
+    Queue::push(new DummyWorkerFollowUpJob());
+
+    // Worker turn 1: processes the poll job, which releases itself with a 10s delay
+    Artisan::call('queue:work', ['--once' => true]);
+
+    $this->assertFalse(DummyWorkerFollowUpJob::$executed);
+
+    // Worker turn 2: worker is NOT blocked; it immediately picks up and runs the follow-up job!
+    Artisan::call('queue:work', ['--once' => true]);
+
+    $this->assertTrue(DummyWorkerFollowUpJob::$executed, 'Worker should process next job instead of waiting.');
+
+    // Fast-forward 11 seconds: released job is now available again
+    $this->travel(11)->seconds();
+
+    // Worker turn 3: picks up the released poll job on attempt 2 without MaxAttemptsExceeded
+    Artisan::call('queue:work', ['--once' => true]);
+
+    $this->assertSame(ShotState::JudgingVideo, $shot->refresh()->state);
+  }
+
+  public function test_poll_job_completes_render_stores_to_s3_and_dispatches_judge_job(): void
   {
     Storage::fake('s3');
+    Queue::fake([JudgeVideoJob::class]);
 
     $brief = Brief::create([
       'prompt' => '15s product teaser',
@@ -83,6 +144,35 @@ class PollVideoRenderJobTest extends TestCase
       ->with('test-render-id')
       ->willReturn(VideoRenderResult::completed($videoBytes));
 
+    $job = new PollVideoRenderJob($shot->id, 'test-render-id', $brief->id);
+    $job->handle($provider);
+
+    $shot->refresh();
+
+    $this->assertSame(ShotState::JudgingVideo, $shot->state);
+    $this->assertNotNull($shot->video_path);
+    Storage::disk('s3')->assertExists($shot->video_path);
+    $this->assertSame($videoBytes, Storage::disk('s3')->get($shot->video_path));
+
+    Queue::assertPushed(JudgeVideoJob::class, fn (JudgeVideoJob $j) => $j->shotId === $shot->id);
+  }
+
+  public function test_judge_video_job_persists_judgement_and_transitions_shot_to_done(): void
+  {
+    $brief = Brief::create([
+      'prompt' => '15s product teaser',
+      'state' => BriefState::Rendering,
+      'style_anchor' => 'cyberpunk style',
+    ]);
+
+    $shot = Shot::create([
+      'brief_id' => $brief->id,
+      'sequence' => 1,
+      'prompt' => 'Shot 1 prompt',
+      'state' => ShotState::JudgingVideo,
+      'video_path' => 'videos/test.mp4',
+    ]);
+
     $judge = $this->createMock(JudgeInterface::class);
     $judge->expects($this->once())
       ->method('judgeVideo')
@@ -95,18 +185,13 @@ class PollVideoRenderJobTest extends TestCase
         ],
         hardFailTags: [],
         reason: 'Looks great',
-        verdict: 'pass',
+        verdict: JudgementVerdict::Pass,
       ));
 
-    $job = new PollVideoRenderJob($shot->id, 'test-render-id');
-    $job->handle($provider, $judge);
+    $job = new JudgeVideoJob($shot->id, $brief->id);
+    $job->handle($judge);
 
-    $shot->refresh();
-
-    $this->assertSame(ShotState::Done, $shot->state);
-    $this->assertNotNull($shot->video_path);
-    Storage::disk('s3')->assertExists($shot->video_path);
-    $this->assertSame($videoBytes, Storage::disk('s3')->get($shot->video_path));
+    $this->assertSame(ShotState::Done, $shot->refresh()->state);
 
     $judgement = Judgement::where('shot_id', $shot->id)->first();
     $this->assertNotNull($judgement);

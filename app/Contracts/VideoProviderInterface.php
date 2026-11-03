@@ -13,10 +13,9 @@ interface VideoProviderInterface
    *
    * @param string $prompt
    * @param string $keyframePath
-   * @param array<string, mixed> $options
    * @return string Unique render identifier
    */
-  public function submit(string $prompt, string $keyframePath, array $options = []): string;
+  public function submit(string $prompt, string $keyframePath): string;
 
   /**
    * Poll status of submitted render job.
