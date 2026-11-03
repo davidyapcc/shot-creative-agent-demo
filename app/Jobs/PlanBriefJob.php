@@ -9,12 +9,13 @@ use App\Enums\BriefState;
 use App\Enums\ShotState;
 use App\Models\Brief;
 use App\Models\Shot;
+use App\Traits\FailsBriefOnJobFailure;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Throwable;
 
 class PlanBriefJob implements ShouldQueue
 {
+  use FailsBriefOnJobFailure;
   use Queueable;
 
   public function __construct(
@@ -49,15 +50,5 @@ class PlanBriefJob implements ShouldQueue
     $brief->transitionTo(BriefState::Keyframes);
 
     ProcessKeyframesJob::dispatch($brief->id);
-  }
-
-  public function failed(?Throwable $exception): void
-  {
-    $brief = Brief::find($this->briefId);
-
-    if ($brief && $brief->state->canTransitionTo(BriefState::Failed))
-    {
-      $brief->transitionTo(BriefState::Failed);
-    }
   }
 }

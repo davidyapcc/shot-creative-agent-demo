@@ -66,6 +66,17 @@ class StateMachineTest extends TestCase
     $brief->transitionTo(BriefState::Planning);
   }
 
+  public function test_brief_rejects_transition_with_mismatched_state_enum(): void
+  {
+    $brief = Brief::create([
+      'prompt' => 'A futuristic neon city in the rain',
+      'state' => BriefState::Pending,
+    ]);
+
+    $this->expectException(InvalidStateTransitionException::class);
+    $brief->transitionTo(ShotState::Pending);
+  }
+
   public function test_shot_can_transition_through_valid_states(): void
   {
     $brief = Brief::create([

@@ -7,12 +7,13 @@ namespace App\Jobs;
 use App\Enums\BriefState;
 use App\Enums\ShotState;
 use App\Models\Brief;
+use App\Traits\FailsBriefOnJobFailure;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Throwable;
 
 class RenderShotsJob implements ShouldQueue
 {
+  use FailsBriefOnJobFailure;
   use Queueable;
 
   public function __construct(
@@ -37,15 +38,5 @@ class RenderShotsJob implements ShouldQueue
 
     $brief->transitionTo(BriefState::Audio);
     GenerateAudioJob::dispatch($brief->id);
-  }
-
-  public function failed(?Throwable $exception): void
-  {
-    $brief = Brief::find($this->briefId);
-
-    if ($brief && $brief->state->canTransitionTo(BriefState::Failed))
-    {
-      $brief->transitionTo(BriefState::Failed);
-    }
   }
 }

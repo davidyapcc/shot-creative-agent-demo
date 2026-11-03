@@ -30,7 +30,6 @@ class BriefController extends Controller
       'data' => [
         'brief' => $brief,
       ],
-      'brief' => $brief,
     ], 202);
   }
 
@@ -43,7 +42,6 @@ class BriefController extends Controller
       'data' => [
         'brief' => $brief,
       ],
-      'brief' => $brief,
     ]);
   }
 }

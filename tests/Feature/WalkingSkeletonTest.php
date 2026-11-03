@@ -4,12 +4,18 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Contracts\AgentInterface;
 use App\Enums\BriefState;
 use App\Enums\ShotState;
+use App\Jobs\GenerateAudioJob;
+use App\Jobs\MuxFinalVideoJob;
 use App\Jobs\PlanBriefJob;
+use App\Jobs\ProcessKeyframesJob;
+use App\Jobs\RenderShotsJob;
 use App\Models\Brief;
 use Exception;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class WalkingSkeletonTest extends TestCase
@@ -18,7 +24,6 @@ class WalkingSkeletonTest extends TestCase
 
   public function test_brief_accepted_and_reaches_done_on_mock_providers(): void
   {
-    // 1. Submit brief through API
     $response = $this->postJson('/briefs', [
       'prompt' => '15s product teaser, rainy Tokyo, neon',
     ]);
@@ -29,8 +34,6 @@ class WalkingSkeletonTest extends TestCase
 
     $briefId = $response->json('data.brief.id');
 
-    // In testing environment with sync queue (or executing queued jobs synchronously),
-    // the brief progresses through the pipeline to completion.
     $brief = Brief::with('shots')->findOrFail($briefId);
 
     $this->assertSame(BriefState::Done, $brief->state);
@@ -46,7 +49,6 @@ class WalkingSkeletonTest extends TestCase
       $this->assertNotNull($shot->video_path);
     }
 
-    // 2. GET /briefs/{id} reflects the completed state
     $getResponse = $this->getJson("/briefs/{$briefId}");
     $getResponse->assertStatus(200)
       ->assertJsonPath('success', true)
@@ -55,6 +57,64 @@ class WalkingSkeletonTest extends TestCase
       ->assertJsonPath('data.brief.shots.0.state', ShotState::Done->value)
       ->assertJsonPath('data.brief.shots.1.state', ShotState::Done->value)
       ->assertJsonPath('data.brief.shots.2.state', ShotState::Done->value);
+  }
+
+  public function test_brief_transitions_through_each_pipeline_stage_sequentially(): void
+  {
+    Queue::fake();
+
+    $brief = Brief::create([
+      'prompt' => '15s product teaser, rainy Tokyo, neon',
+      'state' => BriefState::Pending,
+    ]);
+
+    $this->assertSame(BriefState::Pending, $brief->state);
+
+    // Stage 1: Planning
+    $agent = app(AgentInterface::class);
+    $planJob = new PlanBriefJob($brief->id);
+    $planJob->handle($agent);
+
+    $brief->refresh();
+    $this->assertSame(BriefState::Keyframes, $brief->state);
+    $this->assertCount(3, $brief->shots);
+    $this->assertSame(ShotState::Pending, $brief->shots->first()->state);
+    Queue::assertPushed(ProcessKeyframesJob::class);
+
+    // Stage 2: Keyframes
+    $keyframesJob = new ProcessKeyframesJob($brief->id);
+    $keyframesJob->handle();
+
+    $brief->refresh();
+    $this->assertSame(BriefState::Rendering, $brief->state);
+    $this->assertSame(ShotState::JudgingImage, $brief->shots->first()->state);
+    Queue::assertPushed(RenderShotsJob::class);
+
+    // Stage 3: Rendering
+    $renderJob = new RenderShotsJob($brief->id);
+    $renderJob->handle();
+
+    $brief->refresh();
+    $this->assertSame(BriefState::Audio, $brief->state);
+    $this->assertSame(ShotState::Done, $brief->shots->first()->state);
+    Queue::assertPushed(GenerateAudioJob::class);
+
+    // Stage 4: Audio
+    $audioJob = new GenerateAudioJob($brief->id);
+    $audioJob->handle();
+
+    $brief->refresh();
+    $this->assertSame(BriefState::Muxing, $brief->state);
+    $this->assertNotNull($brief->audio_path);
+    Queue::assertPushed(MuxFinalVideoJob::class);
+
+    // Stage 5: Muxing -> Done
+    $muxJob = new MuxFinalVideoJob($brief->id);
+    $muxJob->handle();
+
+    $brief->refresh();
+    $this->assertSame(BriefState::Done, $brief->state);
+    $this->assertNotNull($brief->final_video_path);
   }
 
   public function test_job_failure_transitions_brief_to_failed(): void

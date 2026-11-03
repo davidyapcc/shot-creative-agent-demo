@@ -5,15 +5,16 @@ declare(strict_types=1);
 namespace App\Traits;
 
 use App\Exceptions\InvalidStateTransitionException;
+use BackedEnum;
 
 trait HasStateTransitions
 {
   /**
    * Transition the entity state or throw if invalid.
    */
-  public function transitionTo(mixed $target): void
+  public function transitionTo(BackedEnum $target): void
   {
-    if (!$this->state->canTransitionTo($target))
+    if (!($target instanceof ($this->state::class)) || !$this->state->canTransitionTo($target))
     {
       throw InvalidStateTransitionException::fromStates(
         $this->state->value,

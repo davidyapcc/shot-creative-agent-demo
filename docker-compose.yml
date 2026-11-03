@@ -10,7 +10,6 @@ services:
     environment:
       APP_NAME: "${APP_NAME:-Shot Creative Agent Demo}"
       APP_ENV: local
-      APP_KEY: ${APP_KEY:-}
       APP_DEBUG: "true"
       DB_CONNECTION: pgsql
       DB_HOST: postgres
@@ -57,7 +56,6 @@ services:
     environment:
       APP_NAME: "${APP_NAME:-Shot Creative Agent Demo}"
       APP_ENV: local
-      APP_KEY: ${APP_KEY:-}
       DB_CONNECTION: pgsql
       DB_HOST: postgres
       DB_PORT: 5432
@@ -94,7 +92,6 @@ services:
     environment:
       APP_NAME: "${APP_NAME:-Shot Creative Agent Demo}"
       APP_ENV: local
-      APP_KEY: ${APP_KEY:-}
       REDIS_CLIENT: predis
       REDIS_HOST: redis
       REDIS_PORT: 6379

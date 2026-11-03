@@ -22,7 +22,13 @@ class BriefApiTest extends TestCase
     $response = $this->postJson('/briefs', []);
 
     $response->assertStatus(422)
-      ->assertJsonValidationErrors(['prompt']);
+      ->assertJsonPath('success', false)
+      ->assertJsonStructure([
+        'error' => [
+          'message',
+          'details' => ['prompt'],
+        ],
+      ]);
   }
 
   public function test_post_briefs_validates_prompt_max_length(): void
@@ -32,7 +38,13 @@ class BriefApiTest extends TestCase
     ]);
 
     $response->assertStatus(422)
-      ->assertJsonValidationErrors(['prompt']);
+      ->assertJsonPath('success', false)
+      ->assertJsonStructure([
+        'error' => [
+          'message',
+          'details' => ['prompt'],
+        ],
+      ]);
   }
 
   public function test_post_briefs_persists_brief_and_only_enqueues_job(): void
@@ -95,6 +107,8 @@ class BriefApiTest extends TestCase
   {
     $response = $this->getJson('/briefs/9999');
 
-    $response->assertStatus(404);
+    $response->assertStatus(404)
+      ->assertJsonPath('success', false)
+      ->assertJsonPath('error.message', 'Resource not found.');
   }
 }
