@@ -5,7 +5,14 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Contracts\AgentInterface;
+use App\Contracts\ImageProviderInterface;
+use App\Contracts\JudgeInterface;
+use App\Contracts\VideoProviderInterface;
 use App\Services\Agent\MockAgent;
+use App\Services\Providers\FfmpegMotionVideoProvider;
+use App\Services\Providers\ReplayImageProvider;
+use App\Services\Providers\ReplayJudge;
+use App\Services\Providers\ReplayVideoProvider;
 use Illuminate\Support\ServiceProvider;
 use InvalidArgumentException;
 
@@ -24,6 +31,42 @@ class AppServiceProvider extends ServiceProvider
       {
         'mock' => new MockAgent(),
         default => throw new InvalidArgumentException("Unsupported agent provider [{$provider}]."),
+      };
+    });
+
+    $this->app->bind(ImageProviderInterface::class, function ()
+    {
+      $provider = config('creative.image', 'replay');
+
+      return match ($provider)
+      {
+        'replay' => new ReplayImageProvider(),
+        default => throw new InvalidArgumentException("Unsupported image provider [{$provider}]."),
+      };
+    });
+
+    $this->app->bind(VideoProviderInterface::class, function ()
+    {
+      $provider = config('creative.video', 'replay');
+
+      return match ($provider)
+      {
+        'replay' => new ReplayVideoProvider(
+          pendingPolls: (int) config('creative.replay_pending_polls', 1),
+        ),
+        'ffmpeg_motion' => new FfmpegMotionVideoProvider(),
+        default => throw new InvalidArgumentException("Unsupported video provider [{$provider}]."),
+      };
+    });
+
+    $this->app->bind(JudgeInterface::class, function ()
+    {
+      $provider = config('creative.judge.provider', 'replay');
+
+      return match ($provider)
+      {
+        'replay' => new ReplayJudge(),
+        default => throw new InvalidArgumentException("Unsupported judge provider [{$provider}]."),
       };
     });
   }

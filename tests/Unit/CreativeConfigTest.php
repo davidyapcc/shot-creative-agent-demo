@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Unit;
 
+use App\Contracts\ImageProviderInterface;
+use App\Contracts\JudgeInterface;
+use App\Contracts\VideoProviderInterface;
 use Tests\TestCase;
 
 class CreativeConfigTest extends TestCase
@@ -54,6 +57,13 @@ class CreativeConfigTest extends TestCase
     $this->assertSame('flux', $config['image']);
     $this->assertSame('veo', $config['video']);
     $this->assertSame('elevenlabs', $config['audio']);
+  }
+
+  public function test_container_resolves_image_video_and_judge_providers(): void
+  {
+    $this->assertInstanceOf(ImageProviderInterface::class, app(ImageProviderInterface::class));
+    $this->assertInstanceOf(VideoProviderInterface::class, app(VideoProviderInterface::class));
+    $this->assertInstanceOf(JudgeInterface::class, app(JudgeInterface::class));
   }
 
   /**

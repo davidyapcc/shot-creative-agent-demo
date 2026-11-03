@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Contracts\AgentInterface;
+use App\Contracts\ImageProviderInterface;
+use App\Contracts\JudgeInterface;
+use App\Contracts\VideoProviderInterface;
 use App\Enums\BriefState;
 use App\Events\BriefStateChanged;
 use App\Enums\ShotState;
@@ -19,6 +22,7 @@ use Exception;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class WalkingSkeletonTest extends TestCase
@@ -27,6 +31,8 @@ class WalkingSkeletonTest extends TestCase
 
   public function test_brief_accepted_and_reaches_done_on_mock_providers(): void
   {
+    Storage::fake('s3');
+
     $response = $this->postJson('/briefs', [
       'prompt' => '15s product teaser, rainy Tokyo, neon',
     ]);
@@ -50,7 +56,12 @@ class WalkingSkeletonTest extends TestCase
       $this->assertSame(ShotState::Done, $shot->state);
       $this->assertNotNull($shot->keyframe_path);
       $this->assertNotNull($shot->video_path);
+      Storage::disk('s3')->assertExists($shot->keyframe_path);
+      Storage::disk('s3')->assertExists($shot->video_path);
+      $this->assertCount(2, $shot->judgements);
     }
+
+    $this->assertDatabaseCount('judgements', 6);
 
     $getResponse = $this->getJson("/briefs/{$briefId}");
     $getResponse->assertStatus(200)
@@ -64,7 +75,12 @@ class WalkingSkeletonTest extends TestCase
 
   public function test_brief_transitions_through_each_pipeline_stage_sequentially(): void
   {
-    Queue::fake();
+    Queue::fake([
+      ProcessKeyframesJob::class,
+      RenderShotsJob::class,
+      GenerateAudioJob::class,
+      MuxFinalVideoJob::class,
+    ]);
 
     $brief = Brief::create([
       'prompt' => '15s product teaser, rainy Tokyo, neon',
@@ -85,8 +101,10 @@ class WalkingSkeletonTest extends TestCase
     Queue::assertPushed(ProcessKeyframesJob::class);
 
     // Stage 2: Keyframes
+    $imageProvider = app(ImageProviderInterface::class);
+    $judge = app(JudgeInterface::class);
     $keyframesJob = new ProcessKeyframesJob($brief->id);
-    $keyframesJob->handle();
+    $keyframesJob->handle($imageProvider, $judge);
 
     $brief->refresh();
     $this->assertSame(BriefState::Rendering, $brief->state);
@@ -94,8 +112,9 @@ class WalkingSkeletonTest extends TestCase
     Queue::assertPushed(RenderShotsJob::class);
 
     // Stage 3: Rendering
+    $videoProvider = app(VideoProviderInterface::class);
     $renderJob = new RenderShotsJob($brief->id);
-    $renderJob->handle();
+    $renderJob->handle($videoProvider);
 
     $brief->refresh();
     $this->assertSame(BriefState::Audio, $brief->state);

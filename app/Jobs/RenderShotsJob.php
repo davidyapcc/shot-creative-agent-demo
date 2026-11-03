@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
-use App\Enums\BriefState;
+use App\Contracts\VideoProviderInterface;
 use App\Enums\ShotState;
 use App\Models\Brief;
 use App\Traits\FailsBriefOnJobFailure;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Bus;
 
 class RenderShotsJob implements ShouldQueue
 {
@@ -20,23 +21,40 @@ class RenderShotsJob implements ShouldQueue
     public readonly int $briefId,
   )
   {
+    $this->onQueue('generate');
   }
 
-  public function handle(): void
+  public function handle(VideoProviderInterface $videoProvider): void
   {
     $brief = Brief::with('shots')->findOrFail($this->briefId);
 
+    $pollJobs = [];
+
     foreach ($brief->shots as $shot)
     {
-      $shot->transitionTo(ShotState::GeneratingVideo);
+      if ($shot->state->canTransitionTo(ShotState::GeneratingVideo))
+      {
+        $shot->transitionTo(ShotState::GeneratingVideo);
+      }
+
+      $renderId = $videoProvider->submit($shot->prompt, (string) $shot->keyframe_path);
+
       $shot->update([
-        'video_path' => "videos/shot_{$shot->id}_video.mp4",
+        'metadata' => array_merge($shot->metadata ?? [], ['render_id' => $renderId]),
       ]);
-      $shot->transitionTo(ShotState::JudgingVideo);
-      $shot->transitionTo(ShotState::Done);
+
+      $pollJobs[] = new PollVideoRenderJob($shot->id, $renderId, $brief->id);
     }
 
-    $brief->transitionTo(BriefState::Audio);
-    GenerateAudioJob::dispatch($brief->id);
+    if (empty($pollJobs))
+    {
+      return;
+    }
+
+    Bus::batch($pollJobs)
+      ->name("render-brief-{$brief->id}")
+      ->then(new AdvanceBriefToAudioCallback($brief->id))
+      ->catch(new FailBriefOnBatchFailureCallback($brief->id))
+      ->dispatch();
   }
 }

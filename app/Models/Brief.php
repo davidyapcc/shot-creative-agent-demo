@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\BriefState;
+use App\Enums\ShotState;
 use App\Events\BriefStateChanged;
 use App\Traits\HasStateTransitions;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
 
 class Brief extends Model
 {
@@ -49,5 +51,25 @@ class Brief extends Model
   public function shots(): HasMany
   {
     return $this->hasMany(Shot::class)->orderBy('sequence');
+  }
+
+  /**
+   * Fail the brief and any shot still in flight.
+   */
+  public function failWithInFlightShots(): void
+  {
+    if (!$this->state->canTransitionTo(BriefState::Failed))
+    {
+      return;
+    }
+
+    DB::transaction(function (): void
+    {
+      $this->transitionTo(BriefState::Failed);
+
+      $this->shots
+        ->filter(fn (Shot $shot) => $shot->state->canTransitionTo(ShotState::Failed))
+        ->each(fn (Shot $shot) => $shot->transitionTo(ShotState::Failed));
+    });
   }
 }
