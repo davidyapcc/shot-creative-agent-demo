@@ -52,8 +52,8 @@ class JudgeVideoJob implements ShouldQueue
     JudgeVerdictRecorded::dispatch(
       briefId: $this->briefId,
       shotId: $this->shotId,
-      stage: 'video',
-      verdict: $verdict->isPass() ? 'pass' : 'fail',
+      stage: JudgementStage::Video,
+      verdict: $verdict->verdict,
       tag: $tag,
       hardFailTags: $verdict->hardFailTags,
       reason: $verdict->reason,

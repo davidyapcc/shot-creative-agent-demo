@@ -2,10 +2,24 @@
   <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 shadow-lg backdrop-blur-sm">
     <div class="mb-4 flex items-center justify-between">
       <div class="flex items-center gap-2">
-        <span class="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span
+          :class="[
+            'inline-flex h-2.5 w-2.5 rounded-full',
+            briefState === 'failed' ? 'bg-rose-400' : 'bg-emerald-400 animate-pulse'
+          ]"
+        ></span>
         <h3 class="text-sm font-semibold uppercase tracking-wider text-zinc-300">Live Stage Stream</h3>
       </div>
-      <span class="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs font-mono text-zinc-400">
+      <span
+        :class="[
+          'rounded-full px-2.5 py-0.5 text-xs font-mono font-medium border',
+          briefState === 'failed'
+            ? 'bg-rose-950/60 text-rose-300 border-rose-800/60'
+            : briefState === 'done'
+              ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60'
+              : 'bg-zinc-800 text-zinc-400 border-zinc-700/60'
+        ]"
+      >
         {{ briefState || 'idle' }}
       </span>
     </div>
@@ -123,18 +137,27 @@ const stageSequence = computed(() => {
   const failTag = props.judgeFailureTag;
   const regenerating = props.isRegenerating;
 
-  // Ordering of states
-  const order = ['pending', 'planning', 'keyframes', 'rendering', 'audio', 'muxing', 'done'];
-  const currentIndex = order.indexOf(state);
+  // Track highest stage achieved by scanning events
+  const eventNames = props.events.map((e) => e.name);
+  const eventDetails = props.events.map((e) => e.detail || '');
+
+  const hasPlanned = state !== 'pending' && state !== 'planning';
+  const hasKeyframes = hasPlanned && (
+    eventNames.includes('VideoProgressUpdated') ||
+    eventDetails.some((d) => d.includes('to rendering') || d.includes('to audio') || d.includes('to muxing') || d.includes('to done')) ||
+    ['rendering', 'audio', 'muxing', 'done'].includes(state)
+  );
+
+  const isFailed = state === 'failed';
 
   // Label for judging step: if failed, show `judging (fail: ${tag})`, else `judging`
   const judgingLabel = failTag ? `judging (fail: ${failTag})` : 'judging';
 
   // Label for video step: e.g. `video 40%` or `video`
-  const videoLabel = progress > 0 && progress < 100
+  const videoLabel = progress > 0
     ? `video ${progress}%`
     : state === 'rendering'
-      ? `video ${progress || 40}%`
+      ? 'video in-progress'
       : 'video';
 
   const stages = [
@@ -143,28 +166,30 @@ const stageSequence = computed(() => {
       label: 'planning',
       status: state === 'planning'
         ? 'active'
-        : currentIndex > order.indexOf('planning')
+        : hasPlanned || ['keyframes', 'rendering', 'audio', 'muxing', 'done'].includes(state) || isFailed
           ? 'completed'
           : 'pending',
     },
     {
       id: 'keyframes',
       label: 'keyframes',
-      status: state === 'keyframes'
+      status: state === 'keyframes' && !failTag
         ? 'active'
-        : currentIndex > order.indexOf('keyframes')
+        : hasKeyframes || ['rendering', 'audio', 'muxing', 'done'].includes(state)
           ? 'completed'
-          : 'pending',
+          : isFailed && !failTag
+            ? 'failed'
+            : 'pending',
     },
     {
       id: 'judging',
       label: judgingLabel,
       status: failTag
         ? 'failed'
-        : state === 'keyframes'
-          ? 'active'
-          : currentIndex > order.indexOf('keyframes')
-            ? 'completed'
+        : hasKeyframes || ['rendering', 'audio', 'muxing', 'done'].includes(state)
+          ? 'completed'
+          : state === 'keyframes'
+            ? 'pending'
             : 'pending',
     },
   ];
@@ -183,7 +208,7 @@ const stageSequence = computed(() => {
       label: videoLabel,
       status: state === 'rendering'
         ? 'active'
-        : currentIndex > order.indexOf('rendering')
+        : ['audio', 'muxing', 'done'].includes(state)
           ? 'completed'
           : 'pending',
     },
@@ -192,7 +217,7 @@ const stageSequence = computed(() => {
       label: 'audio',
       status: state === 'audio'
         ? 'active'
-        : currentIndex > order.indexOf('audio')
+        : ['muxing', 'done'].includes(state)
           ? 'completed'
           : 'pending',
     },
@@ -201,7 +226,7 @@ const stageSequence = computed(() => {
       label: 'muxing',
       status: state === 'muxing'
         ? 'active'
-        : currentIndex > order.indexOf('muxing')
+        : state === 'done'
           ? 'completed'
           : 'pending',
     },

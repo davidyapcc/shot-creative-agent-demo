@@ -51,8 +51,8 @@ class JudgeKeyframeJob implements ShouldQueue
     JudgeVerdictRecorded::dispatch(
       briefId: $this->briefId,
       shotId: $this->shotId,
-      stage: 'image',
-      verdict: $verdict->isPass() ? 'pass' : 'fail',
+      stage: JudgementStage::Image,
+      verdict: $verdict->verdict,
       tag: $tag,
       hardFailTags: $verdict->hardFailTags,
       reason: $verdict->reason,

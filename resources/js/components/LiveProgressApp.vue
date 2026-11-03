@@ -343,14 +343,14 @@ async function loadBrief(id) {
 
     const json = await response.json();
     if (json.success && json.data.brief) {
-      const b = json.data.brief;
-      activeBriefId.value = b.id;
-      briefState.value = b.state;
-      styleAnchor.value = b.style_anchor;
-      audioPath.value = b.audio_path;
-      finalVideoPath.value = b.final_video_path;
-      shots.value = b.shots || [];
-      subscribeToBrief(b.id);
+      const brief = json.data.brief;
+      activeBriefId.value = brief.id;
+      briefState.value = brief.state;
+      styleAnchor.value = brief.style_anchor;
+      audioPath.value = brief.audio_path;
+      finalVideoPath.value = brief.final_video_path;
+      shots.value = brief.shots || [];
+      subscribeToBrief(brief.id);
     }
   } catch (e) {
     console.error('Error loading brief:', e);
@@ -406,7 +406,9 @@ function subscribeToBrief(briefId) {
   });
 
   activeChannel.listen('.JudgeVerdictRecorded', (data) => {
-    addStreamEvent('JudgeVerdictRecorded', `${data.stage} verdict: ${data.verdict.toUpperCase()}${data.tag ? ` (fail: ${data.tag})` : ''}`, data.verdict);
+    const verdictDetail = `${data.stage} verdict: ${data.verdict.toUpperCase()}` +
+      (data.tag ? ` (fail: ${data.tag})` : '');
+    addStreamEvent('JudgeVerdictRecorded', verdictDetail, data.verdict);
 
     if (data.verdict === 'fail') {
       judgeFailureTag.value = data.tag || (data.hardFailTags ? data.hardFailTags[0] : 'failed');

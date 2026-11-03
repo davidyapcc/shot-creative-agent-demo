@@ -11,6 +11,7 @@ use App\Contracts\VideoProviderInterface;
 use App\DTOs\JudgementResult;
 use App\DTOs\VideoRenderResult;
 use App\Enums\BriefState;
+use App\Enums\JudgementStage;
 use App\Enums\JudgementVerdict;
 use App\Enums\ShotState;
 use App\Events\BriefStateChanged;
@@ -110,15 +111,21 @@ class PipelineBroadcastsTest extends TestCase
 
     (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge);
 
-    Event::assertDispatched(JudgeVerdictRecorded::class, function (JudgeVerdictRecorded $event) use ($brief, $shot): bool
-    {
-      return $event->briefId === $brief->id
-        && $event->shotId === $shot->id
-        && $event->stage === 'image'
-        && $event->verdict === 'fail'
-        && $event->tag === 'anatomy'
-        && $event->hardFailTags === ['anatomy'];
-    });
+    Event::assertDispatched(
+      JudgeVerdictRecorded::class,
+      function (JudgeVerdictRecorded $event) use ($brief, $shot): bool
+      {
+        $stage = $event->stage instanceof JudgementStage ? $event->stage->value : $event->stage;
+        $verdict = $event->verdict instanceof JudgementVerdict ? $event->verdict->value : $event->verdict;
+
+        return $event->briefId === $brief->id
+          && $event->shotId === $shot->id
+          && $stage === 'image'
+          && $verdict === 'fail'
+          && $event->tag === 'anatomy'
+          && $event->hardFailTags === ['anatomy'];
+      }
+    );
     Event::assertDispatched(ShotUpdated::class);
   }
 
@@ -145,12 +152,15 @@ class PipelineBroadcastsTest extends TestCase
 
     (new PollVideoRenderJob($shot->id, 'render_123', $brief->id))->handle($videoProvider);
 
-    Event::assertDispatched(VideoProgressUpdated::class, function (VideoProgressUpdated $event) use ($brief, $shot): bool
-    {
-      return $event->briefId === $brief->id
-        && $event->shotId === $shot->id
-        && $event->progress === 40;
-    });
+    Event::assertDispatched(
+      VideoProgressUpdated::class,
+      function (VideoProgressUpdated $event) use ($brief, $shot): bool
+      {
+        return $event->briefId === $brief->id
+          && $event->shotId === $shot->id
+          && $event->progress === 40;
+      }
+    );
   }
 
   public function test_judge_video_dispatches_judge_verdict_recorded_with_failure_tag(): void
@@ -182,14 +192,20 @@ class PipelineBroadcastsTest extends TestCase
 
     (new JudgeVideoJob($shot->id, $brief->id))->handle($judge);
 
-    Event::assertDispatched(JudgeVerdictRecorded::class, function (JudgeVerdictRecorded $event) use ($brief, $shot): bool
-    {
-      return $event->briefId === $brief->id
-        && $event->shotId === $shot->id
-        && $event->stage === 'video'
-        && $event->verdict === 'fail'
-        && $event->tag === 'temporal_flicker';
-    });
+    Event::assertDispatched(
+      JudgeVerdictRecorded::class,
+      function (JudgeVerdictRecorded $event) use ($brief, $shot): bool
+      {
+        $stage = $event->stage instanceof JudgementStage ? $event->stage->value : $event->stage;
+        $verdict = $event->verdict instanceof JudgementVerdict ? $event->verdict->value : $event->verdict;
+
+        return $event->briefId === $brief->id
+          && $event->shotId === $shot->id
+          && $stage === 'video'
+          && $verdict === 'fail'
+          && $event->tag === 'temporal_flicker';
+      }
+    );
     Event::assertDispatched(ShotUpdated::class);
   }
 }

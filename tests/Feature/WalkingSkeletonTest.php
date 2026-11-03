@@ -9,6 +9,7 @@ use App\Contracts\ImageProviderInterface;
 use App\Contracts\JudgeInterface;
 use App\Contracts\VideoProviderInterface;
 use App\Enums\BriefState;
+use App\Enums\JudgementVerdict;
 use App\Enums\ShotState;
 use App\Events\BriefStateChanged;
 use App\Events\JudgeVerdictRecorded;
@@ -228,7 +229,11 @@ class WalkingSkeletonTest extends TestCase
 
     Event::assertDispatched(JudgeVerdictRecorded::class, function (JudgeVerdictRecorded $event) use ($briefId): bool
     {
-      return $event->briefId === $briefId && $event->verdict === 'pass';
+      $isPass = $event->verdict instanceof JudgementVerdict
+        ? $event->verdict === JudgementVerdict::Pass
+        : $event->verdict === 'pass';
+
+      return $event->briefId === $briefId && $isPass;
     });
   }
 

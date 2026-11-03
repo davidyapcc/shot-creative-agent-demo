@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Events;
 
+use App\Enums\JudgementStage;
+use App\Enums\JudgementVerdict;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
@@ -18,8 +20,8 @@ class JudgeVerdictRecorded implements ShouldBroadcastNow
   public function __construct(
     public readonly int $briefId,
     public readonly int $shotId,
-    public readonly string $stage,
-    public readonly string $verdict,
+    public readonly JudgementStage|string $stage,
+    public readonly JudgementVerdict|string $verdict,
     public readonly ?string $tag = null,
     public readonly array $hardFailTags = [],
     public readonly ?string $reason = null,
@@ -50,8 +52,8 @@ class JudgeVerdictRecorded implements ShouldBroadcastNow
     return [
       'briefId' => $this->briefId,
       'shotId' => $this->shotId,
-      'stage' => $this->stage,
-      'verdict' => $this->verdict,
+      'stage' => $this->stage instanceof JudgementStage ? $this->stage->value : (string) $this->stage,
+      'verdict' => $this->verdict instanceof JudgementVerdict ? $this->verdict->value : (string) $this->verdict,
       'tag' => $this->tag,
       'hardFailTags' => $this->hardFailTags,
       'reason' => $this->reason,
