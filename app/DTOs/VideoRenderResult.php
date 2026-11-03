@@ -12,13 +12,17 @@ class VideoRenderResult
     public readonly VideoRenderStatus $status,
     public readonly ?string $videoContent = null,
     public readonly ?string $error = null,
+    public readonly ?int $progress = null,
   )
   {
   }
 
-  public static function pending(): self
+  public static function pending(?int $progress = null): self
   {
-    return new self(status: VideoRenderStatus::Pending);
+    return new self(
+      status: VideoRenderStatus::Pending,
+      progress: $progress,
+    );
   }
 
   public static function completed(string $videoContent): self

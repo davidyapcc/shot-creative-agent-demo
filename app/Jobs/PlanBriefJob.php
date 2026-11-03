@@ -7,6 +7,7 @@ namespace App\Jobs;
 use App\Contracts\AgentInterface;
 use App\Enums\BriefState;
 use App\Enums\ShotState;
+use App\Events\ShotUpdated;
 use App\Models\Brief;
 use App\Models\Shot;
 use App\Traits\FailsBriefOnJobFailure;
@@ -39,12 +40,14 @@ class PlanBriefJob implements ShouldQueue
 
     foreach ($plannedShots as $shotData)
     {
-      Shot::create([
+      $shot = Shot::create([
         'brief_id' => $brief->id,
         'sequence' => $shotData['sequence'],
         'prompt' => $shotData['prompt'],
         'state' => ShotState::Pending,
       ]);
+
+      ShotUpdated::dispatch($shot);
     }
 
     $brief->transitionTo(BriefState::Keyframes);

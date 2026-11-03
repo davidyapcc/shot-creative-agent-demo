@@ -16,9 +16,15 @@ if ! grep -q "^APP_KEY=base64:" .env 2>/dev/null; then
   php artisan key:generate --no-interaction --force
 fi
 
-# 3. Primary web container runs database migrations
+# 3. Primary web container runs database migrations and builds frontend assets if missing
 if [ "$1" = "php" ] && [ "$2" = "artisan" ] && [ "$3" = "serve" ]; then
   php artisan migrate --force --no-interaction
+
+  if [ ! -f "public/build/manifest.json" ] && command -v npm >/dev/null 2>&1; then
+    echo "Building frontend assets..."
+    npm install --ignore-scripts
+    npm run build
+  fi
 fi
 
 exec "$@"

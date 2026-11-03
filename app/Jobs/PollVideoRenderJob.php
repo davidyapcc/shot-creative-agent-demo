@@ -6,6 +6,8 @@ namespace App\Jobs;
 
 use App\Contracts\VideoProviderInterface;
 use App\Enums\ShotState;
+use App\Events\ShotUpdated;
+use App\Events\VideoProgressUpdated;
 use App\Models\Shot;
 use App\Traits\FailsBriefOnJobFailure;
 use DateTimeInterface;
@@ -68,6 +70,9 @@ class PollVideoRenderJob implements ShouldQueue
 
     if ($result->isPending())
     {
+      $progress = $result->progress ?? 40;
+      VideoProgressUpdated::dispatch($this->briefId, $this->shotId, $progress);
+
       $this->release(self::POLL_DELAY_SECONDS);
 
       return;
@@ -92,6 +97,9 @@ class PollVideoRenderJob implements ShouldQueue
     ]);
 
     $shot->transitionTo(ShotState::JudgingVideo);
+
+    VideoProgressUpdated::dispatch($this->briefId, $this->shotId, 100);
+    ShotUpdated::dispatch($shot);
 
     $judgeJob = new JudgeVideoJob($shot->id, $shot->brief_id);
 

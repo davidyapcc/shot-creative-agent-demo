@@ -7,6 +7,8 @@ namespace App\Jobs;
 use App\Contracts\JudgeInterface;
 use App\Enums\JudgementStage;
 use App\Enums\ShotState;
+use App\Events\JudgeVerdictRecorded;
+use App\Events\ShotUpdated;
 use App\Models\Judgement;
 use App\Models\Shot;
 use App\Traits\FailsBriefOnJobFailure;
@@ -45,12 +47,26 @@ class JudgeVideoJob implements ShouldQueue
 
     Judgement::create($verdict->toModelAttributes($shot->id, JudgementStage::Video));
 
+    $tag = $verdict->hardFailTags[0] ?? null;
+
+    JudgeVerdictRecorded::dispatch(
+      briefId: $this->briefId,
+      shotId: $this->shotId,
+      stage: 'video',
+      verdict: $verdict->isPass() ? 'pass' : 'fail',
+      tag: $tag,
+      hardFailTags: $verdict->hardFailTags,
+      reason: $verdict->reason,
+    );
+
     if ($verdict->isPass())
     {
       $shot->transitionTo(ShotState::Done);
+      ShotUpdated::dispatch($shot);
     }
     else
     {
+      ShotUpdated::dispatch($shot->refresh());
       $shot->brief?->failWithInFlightShots();
       $this->batch()?->cancel();
     }

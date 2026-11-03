@@ -43,7 +43,9 @@ class ReplayVideoProvider implements VideoProviderInterface
 
     if ($count <= $this->pendingPolls)
     {
-      return VideoRenderResult::pending();
+      $progress = (int) round(($count / ($this->pendingPolls + 1)) * 100);
+
+      return VideoRenderResult::pending($progress > 0 ? $progress : 40);
     }
 
     $videoBytes = base64_decode(self::DEFAULT_MP4_BASE64, true) ?: '';

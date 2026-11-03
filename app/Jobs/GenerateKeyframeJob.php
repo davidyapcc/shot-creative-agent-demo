@@ -6,6 +6,7 @@ namespace App\Jobs;
 
 use App\Contracts\ImageProviderInterface;
 use App\Enums\ShotState;
+use App\Events\ShotUpdated;
 use App\Models\Shot;
 use App\Traits\FailsBriefOnJobFailure;
 use Illuminate\Bus\Batchable;
@@ -47,5 +48,7 @@ class GenerateKeyframeJob implements ShouldQueue
     ]);
 
     $shot->transitionTo(ShotState::JudgingImage);
+
+    ShotUpdated::dispatch($shot);
   }
 }

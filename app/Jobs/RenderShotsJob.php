@@ -6,6 +6,8 @@ namespace App\Jobs;
 
 use App\Contracts\VideoProviderInterface;
 use App\Enums\ShotState;
+use App\Events\ShotUpdated;
+use App\Events\VideoProgressUpdated;
 use App\Models\Brief;
 use App\Traits\FailsBriefOnJobFailure;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -42,6 +44,9 @@ class RenderShotsJob implements ShouldQueue
       $shot->update([
         'metadata' => array_merge($shot->metadata ?? [], ['render_id' => $renderId]),
       ]);
+
+      VideoProgressUpdated::dispatch($brief->id, $shot->id, 0);
+      ShotUpdated::dispatch($shot);
 
       $pollJobs[] = new PollVideoRenderJob($shot->id, $renderId, $brief->id);
     }
