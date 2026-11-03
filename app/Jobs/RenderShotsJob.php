@@ -7,9 +7,9 @@ namespace App\Jobs;
 use App\Enums\BriefState;
 use App\Enums\ShotState;
 use App\Models\Brief;
-use App\Models\Judgement;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Throwable;
 
 class RenderShotsJob implements ShouldQueue
 {
@@ -32,25 +32,20 @@ class RenderShotsJob implements ShouldQueue
         'video_path' => "videos/shot_{$shot->id}_video.mp4",
       ]);
       $shot->transitionTo(ShotState::JudgingVideo);
-
-      Judgement::create([
-        'shot_id' => $shot->id,
-        'stage' => 'video',
-        'scores' => [
-          'prompt_adherence' => 5,
-          'anatomy' => 5,
-          'object_integrity' => 5,
-          'temporal_consistency' => 5,
-        ],
-        'hard_fail_tags' => [],
-        'reason' => 'Video render maintains temporal consistency and high fidelity.',
-        'verdict' => 'pass',
-      ]);
-
       $shot->transitionTo(ShotState::Done);
     }
 
     $brief->transitionTo(BriefState::Audio);
     GenerateAudioJob::dispatch($brief->id);
+  }
+
+  public function failed(?Throwable $exception): void
+  {
+    $brief = Brief::find($this->briefId);
+
+    if ($brief && $brief->state->canTransitionTo(BriefState::Failed))
+    {
+      $brief->transitionTo(BriefState::Failed);
+    }
   }
 }

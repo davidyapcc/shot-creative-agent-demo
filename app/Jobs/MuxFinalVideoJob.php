@@ -8,6 +8,7 @@ use App\Enums\BriefState;
 use App\Models\Brief;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Throwable;
 
 class MuxFinalVideoJob implements ShouldQueue
 {
@@ -27,5 +28,15 @@ class MuxFinalVideoJob implements ShouldQueue
     ]);
 
     $brief->transitionTo(BriefState::Done);
+  }
+
+  public function failed(?Throwable $exception): void
+  {
+    $brief = Brief::find($this->briefId);
+
+    if ($brief && $brief->state->canTransitionTo(BriefState::Failed))
+    {
+      $brief->transitionTo(BriefState::Failed);
+    }
   }
 }

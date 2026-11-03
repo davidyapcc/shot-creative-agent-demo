@@ -6,7 +6,9 @@ namespace Tests\Feature;
 
 use App\Enums\BriefState;
 use App\Enums\ShotState;
+use App\Jobs\PlanBriefJob;
 use App\Models\Brief;
+use Exception;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -22,9 +24,10 @@ class WalkingSkeletonTest extends TestCase
     ]);
 
     $response->assertStatus(202)
-      ->assertJsonPath('brief.state', BriefState::Pending->value);
+      ->assertJsonPath('success', true)
+      ->assertJsonPath('data.brief.state', BriefState::Pending->value);
 
-    $briefId = $response->json('brief.id');
+    $briefId = $response->json('data.brief.id');
 
     // In testing environment with sync queue (or executing queued jobs synchronously),
     // the brief progresses through the pipeline to completion.
@@ -41,16 +44,30 @@ class WalkingSkeletonTest extends TestCase
       $this->assertSame(ShotState::Done, $shot->state);
       $this->assertNotNull($shot->keyframe_path);
       $this->assertNotNull($shot->video_path);
-      $this->assertCount(2, $shot->judgements);
     }
 
     // 2. GET /briefs/{id} reflects the completed state
     $getResponse = $this->getJson("/briefs/{$briefId}");
     $getResponse->assertStatus(200)
-      ->assertJsonPath('brief.state', BriefState::Done->value)
-      ->assertJsonCount(3, 'brief.shots')
-      ->assertJsonPath('brief.shots.0.state', ShotState::Done->value)
-      ->assertJsonPath('brief.shots.1.state', ShotState::Done->value)
-      ->assertJsonPath('brief.shots.2.state', ShotState::Done->value);
+      ->assertJsonPath('success', true)
+      ->assertJsonPath('data.brief.state', BriefState::Done->value)
+      ->assertJsonCount(3, 'data.brief.shots')
+      ->assertJsonPath('data.brief.shots.0.state', ShotState::Done->value)
+      ->assertJsonPath('data.brief.shots.1.state', ShotState::Done->value)
+      ->assertJsonPath('data.brief.shots.2.state', ShotState::Done->value);
+  }
+
+  public function test_job_failure_transitions_brief_to_failed(): void
+  {
+    $brief = Brief::create([
+      'prompt' => '15s product teaser, rainy Tokyo, neon',
+      'state' => BriefState::Pending,
+    ]);
+
+    $job = new PlanBriefJob($brief->id);
+    $job->failed(new Exception('Something went wrong during generation'));
+
+    $brief->refresh();
+    $this->assertSame(BriefState::Failed, $brief->state);
   }
 }

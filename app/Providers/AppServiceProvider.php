@@ -7,6 +7,7 @@ namespace App\Providers;
 use App\Contracts\AgentInterface;
 use App\Services\Agent\MockAgent;
 use Illuminate\Support\ServiceProvider;
+use InvalidArgumentException;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -22,7 +23,7 @@ class AppServiceProvider extends ServiceProvider
       return match ($provider)
       {
         'mock' => new MockAgent(),
-        default => new MockAgent(),
+        default => throw new InvalidArgumentException("Unsupported agent provider [{$provider}]."),
       };
     });
   }

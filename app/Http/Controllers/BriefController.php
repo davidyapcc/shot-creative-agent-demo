@@ -15,7 +15,7 @@ class BriefController extends Controller
   public function store(Request $request): JsonResponse
   {
     $validated = $request->validate([
-      'prompt' => ['required', 'string', 'min:3'],
+      'prompt' => ['required', 'string', 'min:3', 'max:1000'],
     ]);
 
     $brief = Brief::create([
@@ -26,6 +26,10 @@ class BriefController extends Controller
     PlanBriefJob::dispatch($brief->id);
 
     return response()->json([
+      'success' => true,
+      'data' => [
+        'brief' => $brief,
+      ],
       'brief' => $brief,
     ], 202);
   }
@@ -35,6 +39,10 @@ class BriefController extends Controller
     $brief = Brief::with('shots')->findOrFail($id);
 
     return response()->json([
+      'success' => true,
+      'data' => [
+        'brief' => $brief,
+      ],
       'brief' => $brief,
     ]);
   }

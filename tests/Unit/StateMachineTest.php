@@ -23,8 +23,6 @@ class StateMachineTest extends TestCase
       'state' => BriefState::Pending,
     ]);
 
-    $this->assertSame(BriefState::Pending, $brief->state);
-
     $brief->transitionTo(BriefState::Planning);
     $this->assertSame(BriefState::Planning, $brief->state);
 
@@ -63,6 +61,7 @@ class StateMachineTest extends TestCase
     ]);
 
     $brief->transitionTo(BriefState::Failed);
+
     $this->expectException(InvalidStateTransitionException::class);
     $brief->transitionTo(BriefState::Planning);
   }
@@ -99,7 +98,7 @@ class StateMachineTest extends TestCase
     $this->assertSame(ShotState::Done, $shot->state);
   }
 
-  public function test_shot_rejects_illegal_transition(): void
+  public function test_shot_rejects_illegal_transition_from_pending_to_done(): void
   {
     $brief = Brief::create([
       'prompt' => 'A futuristic neon city in the rain',
@@ -115,5 +114,45 @@ class StateMachineTest extends TestCase
 
     $this->expectException(InvalidStateTransitionException::class);
     $shot->transitionTo(ShotState::Done);
+  }
+
+  public function test_shot_rejects_illegal_transition_from_generating_image_to_done(): void
+  {
+    $brief = Brief::create([
+      'prompt' => 'A futuristic neon city in the rain',
+      'state' => BriefState::Pending,
+    ]);
+
+    $shot = Shot::create([
+      'brief_id' => $brief->id,
+      'sequence' => 1,
+      'prompt' => 'Wide shot of cyberpunk neon alley',
+      'state' => ShotState::Pending,
+    ]);
+
+    $shot->transitionTo(ShotState::GeneratingImage);
+
+    $this->expectException(InvalidStateTransitionException::class);
+    $shot->transitionTo(ShotState::Done);
+  }
+
+  public function test_shot_terminal_state_cannot_transition(): void
+  {
+    $brief = Brief::create([
+      'prompt' => 'A futuristic neon city in the rain',
+      'state' => BriefState::Pending,
+    ]);
+
+    $shot = Shot::create([
+      'brief_id' => $brief->id,
+      'sequence' => 1,
+      'prompt' => 'Wide shot of cyberpunk neon alley',
+      'state' => ShotState::Pending,
+    ]);
+
+    $shot->transitionTo(ShotState::Failed);
+
+    $this->expectException(InvalidStateTransitionException::class);
+    $shot->transitionTo(ShotState::GeneratingImage);
   }
 }

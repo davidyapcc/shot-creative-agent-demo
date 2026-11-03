@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\ShotState;
-use App\Exceptions\InvalidStateTransitionException;
+use App\Traits\HasStateTransitions;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Shot extends Model
 {
   use HasFactory;
+  use HasStateTransitions;
 
   protected $fillable = [
     'brief_id',
@@ -44,19 +45,5 @@ class Shot extends Model
   public function judgements(): HasMany
   {
     return $this->hasMany(Judgement::class);
-  }
-
-  public function transitionTo(ShotState $target): void
-  {
-    if (!$this->state->canTransitionTo($target))
-    {
-      throw InvalidStateTransitionException::fromStates(
-        $this->state->value,
-        $target->value,
-        'Shot',
-      );
-    }
-
-    $this->update(['state' => $target]);
   }
 }

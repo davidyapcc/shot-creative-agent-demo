@@ -25,6 +25,16 @@ class BriefApiTest extends TestCase
       ->assertJsonValidationErrors(['prompt']);
   }
 
+  public function test_post_briefs_validates_prompt_max_length(): void
+  {
+    $response = $this->postJson('/briefs', [
+      'prompt' => str_repeat('a', 1001),
+    ]);
+
+    $response->assertStatus(422)
+      ->assertJsonValidationErrors(['prompt']);
+  }
+
   public function test_post_briefs_persists_brief_and_only_enqueues_job(): void
   {
     Queue::fake();
@@ -34,17 +44,18 @@ class BriefApiTest extends TestCase
     ]);
 
     $response->assertStatus(202)
-      ->assertJsonPath('brief.prompt', '15s product teaser, rainy Tokyo, neon')
-      ->assertJsonPath('brief.state', BriefState::Pending->value);
+      ->assertJsonPath('success', true)
+      ->assertJsonPath('data.brief.prompt', '15s product teaser, rainy Tokyo, neon')
+      ->assertJsonPath('data.brief.state', BriefState::Pending->value);
 
     $this->assertDatabaseHas('briefs', [
       'prompt' => '15s product teaser, rainy Tokyo, neon',
       'state' => BriefState::Pending->value,
     ]);
 
-    Queue::assertPushed(PlanBriefJob::class, function (PlanBriefJob $job) use ($response)
+    Queue::assertPushed(PlanBriefJob::class, function (PlanBriefJob $job) use ($response): bool
     {
-      return $job->briefId === $response->json('brief.id');
+      return $job->briefId === $response->json('data.brief.id');
     });
   }
 
@@ -55,14 +66,14 @@ class BriefApiTest extends TestCase
       'state' => BriefState::Planning,
     ]);
 
-    $shot1 = Shot::create([
+    Shot::create([
       'brief_id' => $brief->id,
       'sequence' => 1,
       'prompt' => 'Shot 1: Neon sign reflecting on puddle',
       'state' => ShotState::Pending,
     ]);
 
-    $shot2 = Shot::create([
+    Shot::create([
       'brief_id' => $brief->id,
       'sequence' => 2,
       'prompt' => 'Shot 2: Close up of product on rainy asphalt',
@@ -72,14 +83,15 @@ class BriefApiTest extends TestCase
     $response = $this->getJson("/briefs/{$brief->id}");
 
     $response->assertStatus(200)
-      ->assertJsonPath('brief.id', $brief->id)
-      ->assertJsonPath('brief.state', BriefState::Planning->value)
-      ->assertJsonCount(2, 'brief.shots')
-      ->assertJsonPath('brief.shots.0.sequence', 1)
-      ->assertJsonPath('brief.shots.1.sequence', 2);
+      ->assertJsonPath('success', true)
+      ->assertJsonPath('data.brief.id', $brief->id)
+      ->assertJsonPath('data.brief.state', BriefState::Planning->value)
+      ->assertJsonCount(2, 'data.brief.shots')
+      ->assertJsonPath('data.brief.shots.0.sequence', 1)
+      ->assertJsonPath('data.brief.shots.1.sequence', 2);
   }
 
-  public function test_get_brief_not_found(): void
+  public function test_get_brief_returns_404_when_brief_does_not_exist(): void
   {
     $response = $this->getJson('/briefs/9999');
 

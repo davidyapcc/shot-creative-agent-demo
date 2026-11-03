@@ -11,6 +11,7 @@ use App\Models\Brief;
 use App\Models\Shot;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Throwable;
 
 class PlanBriefJob implements ShouldQueue
 {
@@ -48,5 +49,15 @@ class PlanBriefJob implements ShouldQueue
     $brief->transitionTo(BriefState::Keyframes);
 
     ProcessKeyframesJob::dispatch($brief->id);
+  }
+
+  public function failed(?Throwable $exception): void
+  {
+    $brief = Brief::find($this->briefId);
+
+    if ($brief && $brief->state->canTransitionTo(BriefState::Failed))
+    {
+      $brief->transitionTo(BriefState::Failed);
+    }
   }
 }

@@ -8,6 +8,7 @@ use App\Enums\BriefState;
 use App\Models\Brief;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Throwable;
 
 class GenerateAudioJob implements ShouldQueue
 {
@@ -28,5 +29,15 @@ class GenerateAudioJob implements ShouldQueue
 
     $brief->transitionTo(BriefState::Muxing);
     MuxFinalVideoJob::dispatch($brief->id);
+  }
+
+  public function failed(?Throwable $exception): void
+  {
+    $brief = Brief::find($this->briefId);
+
+    if ($brief && $brief->state->canTransitionTo(BriefState::Failed))
+    {
+      $brief->transitionTo(BriefState::Failed);
+    }
   }
 }

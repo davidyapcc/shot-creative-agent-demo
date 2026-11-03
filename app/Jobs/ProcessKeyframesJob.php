@@ -7,9 +7,9 @@ namespace App\Jobs;
 use App\Enums\BriefState;
 use App\Enums\ShotState;
 use App\Models\Brief;
-use App\Models\Judgement;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Throwable;
 
 class ProcessKeyframesJob implements ShouldQueue
 {
@@ -32,23 +32,19 @@ class ProcessKeyframesJob implements ShouldQueue
         'keyframe_path' => "keyframes/shot_{$shot->id}_keyframe.png",
       ]);
       $shot->transitionTo(ShotState::JudgingImage);
-
-      Judgement::create([
-        'shot_id' => $shot->id,
-        'stage' => 'image',
-        'scores' => [
-          'prompt_adherence' => 5,
-          'anatomy' => 5,
-          'object_integrity' => 5,
-          'temporal_consistency' => 5,
-        ],
-        'hard_fail_tags' => [],
-        'reason' => 'Keyframe conforms to style anchor and prompt.',
-        'verdict' => 'pass',
-      ]);
     }
 
     $brief->transitionTo(BriefState::Rendering);
     RenderShotsJob::dispatch($brief->id);
+  }
+
+  public function failed(?Throwable $exception): void
+  {
+    $brief = Brief::find($this->briefId);
+
+    if ($brief && $brief->state->canTransitionTo(BriefState::Failed))
+    {
+      $brief->transitionTo(BriefState::Failed);
+    }
   }
 }
