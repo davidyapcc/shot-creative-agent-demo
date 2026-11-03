@@ -4,17 +4,11 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
-use App\Contracts\ImageProviderInterface;
-use App\Contracts\JudgeInterface;
-use App\Enums\BriefState;
-use App\Enums\JudgementStage;
-use App\Enums\ShotState;
 use App\Models\Brief;
-use App\Models\Judgement;
 use App\Traits\FailsBriefOnJobFailure;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Bus;
 
 class ProcessKeyframesJob implements ShouldQueue
 {
@@ -28,46 +22,29 @@ class ProcessKeyframesJob implements ShouldQueue
     $this->onQueue('generate');
   }
 
-  public function handle(ImageProviderInterface $imageProvider, JudgeInterface $judge): void
+  public function handle(): void
   {
     $brief = Brief::with('shots')->findOrFail($this->briefId);
 
-    $hasFailedShot = false;
+    $chains = [];
 
     foreach ($brief->shots as $shot)
     {
-      $shot->transitionTo(ShotState::GeneratingImage);
-
-      $imageBytes = $imageProvider->generateImage($shot->prompt, $brief->style_anchor);
-      $keyframePath = "keyframes/brief_{$brief->id}_shot_{$shot->id}.png";
-
-      Storage::disk('s3')->put($keyframePath, $imageBytes);
-
-      $shot->update([
-        'keyframe_path' => $keyframePath,
-      ]);
-
-      $shot->transitionTo(ShotState::JudgingImage);
-
-      $verdict = $judge->judgeImage($keyframePath, $shot->prompt, $brief->style_anchor);
-
-      Judgement::create($verdict->toModelAttributes($shot->id, JudgementStage::Image));
-
-      if ($verdict->isFail())
-      {
-        $shot->transitionTo(ShotState::Failed);
-        $hasFailedShot = true;
-      }
+      $chains[] = [
+        new GenerateKeyframeJob($shot->id, $brief->id),
+        new JudgeKeyframeJob($shot->id, $brief->id),
+      ];
     }
 
-    if ($hasFailedShot)
+    if (empty($chains))
     {
-      $brief->transitionTo(BriefState::Failed);
-
       return;
     }
 
-    $brief->transitionTo(BriefState::Rendering);
-    RenderShotsJob::dispatch($brief->id);
+    Bus::batch($chains)
+      ->name("keyframes-brief-{$brief->id}")
+      ->then(new AdvanceBriefToRenderingCallback($brief->id))
+      ->catch(new FailBriefOnBatchFailureCallback($brief->id))
+      ->dispatch();
   }
 }

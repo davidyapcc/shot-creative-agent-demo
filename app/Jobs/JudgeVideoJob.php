@@ -51,7 +51,7 @@ class JudgeVideoJob implements ShouldQueue
     }
     else
     {
-      $shot->transitionTo(ShotState::Failed);
+      $shot->brief?->failWithInFlightShots();
       $this->batch()?->cancel();
     }
   }

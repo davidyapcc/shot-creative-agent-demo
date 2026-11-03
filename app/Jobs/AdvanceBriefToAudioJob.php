@@ -18,6 +18,11 @@ class AdvanceBriefToAudioJob
 
   public function __invoke(Batch $batch): void
   {
+    if ($batch->cancelled())
+    {
+      return;
+    }
+
     $brief = Brief::find($this->briefId);
 
     if ($brief !== null && $brief->state === BriefState::Rendering)

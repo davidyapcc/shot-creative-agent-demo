@@ -11,11 +11,14 @@ use App\DTOs\VideoRenderResult;
 use App\Enums\BriefState;
 use App\Enums\JudgementVerdict;
 use App\Enums\ShotState;
+use App\Jobs\AdvanceBriefToAudioJob;
+use App\Jobs\GenerateAudioJob;
 use App\Jobs\JudgeVideoJob;
 use App\Jobs\PollVideoRenderJob;
 use App\Models\Brief;
 use App\Models\Judgement;
 use App\Models\Shot;
+use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -96,26 +99,22 @@ class PollVideoRenderJobTest extends TestCase
       );
     $this->app->instance(VideoProviderInterface::class, $mockProvider);
 
-    // Queue the poll job first, followed immediately by another job
     Queue::push(new PollVideoRenderJob($shot->id, 'render-pending-test', $brief->id));
     Queue::push(new DummyWorkerFollowUpJob());
 
-    // Worker turn 1: processes the poll job, which releases itself with a 10s delay
+    // Worker turn 1: poll job releases itself with 10s delay
     Artisan::call('queue:work', ['--once' => true]);
-
     $this->assertFalse(DummyWorkerFollowUpJob::$executed);
 
-    // Worker turn 2: worker is NOT blocked; it immediately picks up and runs the follow-up job!
+    // Worker turn 2: worker runs follow-up job immediately
     Artisan::call('queue:work', ['--once' => true]);
+    $this->assertTrue(DummyWorkerFollowUpJob::$executed);
 
-    $this->assertTrue(DummyWorkerFollowUpJob::$executed, 'Worker should process next job instead of waiting.');
-
-    // Fast-forward 11 seconds: released job is now available again
+    // Fast-forward past delay
     $this->travel(11)->seconds();
 
-    // Worker turn 3: picks up the released poll job on attempt 2 without MaxAttemptsExceeded
+    // Worker turn 3: poll job resumes on attempt 2 without MaxAttemptsExceeded
     Artisan::call('queue:work', ['--once' => true]);
-
     $this->assertSame(ShotState::JudgingVideo, $shot->refresh()->state);
   }
 
@@ -155,6 +154,36 @@ class PollVideoRenderJobTest extends TestCase
     $this->assertSame($videoBytes, Storage::disk('s3')->get($shot->video_path));
 
     Queue::assertPushed(JudgeVideoJob::class, fn (JudgeVideoJob $j) => $j->shotId === $shot->id);
+  }
+
+  public function test_poll_job_fails_immediately_when_provider_reports_failure(): void
+  {
+    $brief = Brief::create([
+      'prompt' => '15s product teaser',
+      'state' => BriefState::Rendering,
+    ]);
+
+    $shot = Shot::create([
+      'brief_id' => $brief->id,
+      'sequence' => 1,
+      'prompt' => 'Shot 1 prompt',
+      'state' => ShotState::GeneratingVideo,
+    ]);
+
+    $provider = $this->createMock(VideoProviderInterface::class);
+    $provider->expects($this->once())
+      ->method('poll')
+      ->with('failed-render-id')
+      ->willReturn(VideoRenderResult::failed('CUDA out of memory'));
+
+    $job = new PollVideoRenderJob($shot->id, 'failed-render-id', $brief->id);
+    $job->withFakeQueueInteractions();
+
+    $job->handle($provider);
+
+    $this->assertTrue($job->job->hasFailed());
+    $this->assertSame(ShotState::Failed, $shot->refresh()->state);
+    $this->assertSame(BriefState::Failed, $brief->refresh()->state);
   }
 
   public function test_judge_video_job_persists_judgement_and_transitions_shot_to_done(): void
@@ -198,5 +227,62 @@ class PollVideoRenderJobTest extends TestCase
     $this->assertSame('video', $judgement->stage);
     $this->assertSame('pass', $judgement->verdict);
     $this->assertArrayHasKey('temporal_consistency', $judgement->scores);
+  }
+
+  public function test_judge_video_job_fails_brief_and_shots_on_verdict_fail(): void
+  {
+    $brief = Brief::create([
+      'prompt' => '15s product teaser',
+      'state' => BriefState::Rendering,
+      'style_anchor' => 'cyberpunk style',
+    ]);
+
+    $shot = Shot::create([
+      'brief_id' => $brief->id,
+      'sequence' => 1,
+      'prompt' => 'Shot 1 prompt',
+      'state' => ShotState::JudgingVideo,
+      'video_path' => 'videos/test.mp4',
+    ]);
+
+    $failingJudge = $this->createMock(JudgeInterface::class);
+    $failingJudge->expects($this->once())
+      ->method('judgeVideo')
+      ->willReturn(new JudgementResult(
+        scores: [
+          'prompt_adherence' => 2,
+          'anatomy' => 2,
+          'object_integrity' => 2,
+          'temporal_consistency' => 1,
+        ],
+        hardFailTags: ['temporal_flicker'],
+        reason: 'Extreme temporal flicker',
+        verdict: JudgementVerdict::Fail,
+      ));
+
+    $job = new JudgeVideoJob($shot->id, $brief->id);
+    $job->handle($failingJudge);
+
+    $this->assertSame(ShotState::Failed, $shot->refresh()->state);
+    $this->assertSame(BriefState::Failed, $brief->refresh()->state);
+  }
+
+  public function test_advance_brief_to_audio_job_ignores_cancelled_batch(): void
+  {
+    Queue::fake([GenerateAudioJob::class]);
+
+    $brief = Brief::create([
+      'prompt' => '15s product teaser',
+      'state' => BriefState::Rendering,
+    ]);
+
+    $callback = new AdvanceBriefToAudioJob($brief->id);
+    $batch = $this->createMock(Batch::class);
+    $batch->expects($this->once())->method('cancelled')->willReturn(true);
+
+    $callback($batch);
+
+    $this->assertSame(BriefState::Rendering, $brief->refresh()->state);
+    Queue::assertNothingPushed();
   }
 }

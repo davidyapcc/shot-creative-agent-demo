@@ -16,7 +16,6 @@ use InvalidArgumentException;
 class FfmpegMotionVideoProvider implements VideoProviderInterface
 {
   private const VIDEO_DURATION_SECONDS = '2';
-  private const TARGET_SCALE = 'scale=640:360';
   private const ZOOMPAN_FILTER = "scale=640:360,zoompan=z='min(zoom+0.0015,1.2)':d=50:s=640x360";
   private const CACHE_TTL_SECONDS = 3600;
   private const FFMPEG_TIMEOUT_SECONDS = 15;
@@ -67,7 +66,10 @@ class FfmpegMotionVideoProvider implements VideoProviderInterface
 
   private function transcodeImageToVideo(string $imageBytes): VideoRenderResult
   {
-    if (@getimagesizefromstring($imageBytes) === false)
+    $isPng = str_starts_with($imageBytes, "\x89PNG\r\n\x1a\n");
+    $isJpeg = str_starts_with($imageBytes, "\xFF\xD8\xFF");
+
+    if (!$isPng && !$isJpeg)
     {
       return VideoRenderResult::failed('Invalid or corrupt keyframe image data.');
     }

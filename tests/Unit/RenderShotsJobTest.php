@@ -8,6 +8,7 @@ use App\Contracts\VideoProviderInterface;
 use App\Enums\BriefState;
 use App\Enums\ShotState;
 use App\Jobs\AdvanceBriefToAudioJob;
+use App\Jobs\FailBriefOnBatchFailureCallback;
 use App\Jobs\GenerateAudioJob;
 use App\Jobs\RenderShotsJob;
 use App\Models\Brief;
@@ -105,5 +106,28 @@ class RenderShotsJobTest extends TestCase
 
     $this->assertSame(BriefState::Failed, $brief->refresh()->state);
     Queue::assertNothingPushed();
+  }
+
+  public function test_fail_brief_on_batch_failure_callback_fails_brief_and_shots(): void
+  {
+    $brief = Brief::create([
+      'prompt' => '15s product teaser',
+      'state' => BriefState::Rendering,
+    ]);
+
+    $shot = Shot::create([
+      'brief_id' => $brief->id,
+      'sequence' => 1,
+      'prompt' => 'Shot 1',
+      'state' => ShotState::GeneratingVideo,
+    ]);
+
+    $callback = new FailBriefOnBatchFailureCallback($brief->id);
+    $batch = $this->createMock(\Illuminate\Bus\Batch::class);
+
+    $callback($batch, new \RuntimeException('Batch worker crashed'));
+
+    $this->assertSame(BriefState::Failed, $brief->refresh()->state);
+    $this->assertSame(ShotState::Failed, $shot->refresh()->state);
   }
 }

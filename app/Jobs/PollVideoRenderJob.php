@@ -30,6 +30,16 @@ class PollVideoRenderJob implements ShouldQueue
    */
   public int $tries = 0;
 
+  /**
+   * Maximum allowed unhandled exceptions before failing.
+   */
+  public int $maxExceptions = 3;
+
+  /**
+   * Delay between exception retries.
+   */
+  public int $backoff = self::POLL_DELAY_SECONDS;
+
   public function __construct(
     public readonly int $shotId,
     public readonly string $renderId,
@@ -65,7 +75,13 @@ class PollVideoRenderJob implements ShouldQueue
 
     if ($result->isFailed())
     {
-      throw new RuntimeException('Video render failed: ' . ($result->error ?? 'unknown error'));
+      $exception = new RuntimeException('Video render failed: ' . ($result->error ?? 'unknown error'));
+      $shot = Shot::with('brief')->find($this->shotId);
+      $shot?->brief?->failWithInFlightShots();
+      $this->batch()?->cancel();
+      $this->fail($exception);
+
+      return;
     }
 
     $shot = Shot::with('brief')->findOrFail($this->shotId);
