@@ -197,12 +197,51 @@ return [
     */
 
     'defaults' => [
-        'supervisor-1' => [
+        'supervisor-default' => [
             'connection' => 'redis',
-            'queue' => ['default', 'generate', 'poll', 'judge'],
+            'queue' => ['default'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 3,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 128,
+            'tries' => 1,
+            'timeout' => 60,
+            'nice' => 0,
+        ],
+        'supervisor-generate' => [
+            'connection' => 'redis',
+            'queue' => ['generate'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             'maxProcesses' => 5,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 128,
+            'tries' => 1,
+            'timeout' => 120,
+            'nice' => 0,
+        ],
+        'supervisor-poll' => [
+            'connection' => 'redis',
+            'queue' => ['poll'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 5,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 128,
+            'tries' => 1,
+            'timeout' => 60,
+            'nice' => 0,
+        ],
+        'supervisor-judge' => [
+            'connection' => 'redis',
+            'queue' => ['judge'],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 3,
             'maxTime' => 0,
             'maxJobs' => 0,
             'memory' => 128,
@@ -226,10 +265,17 @@ return [
 
     'environments' => [
         'production' => [
-            'supervisor-1' => [
+            'supervisor-default' => [
+                'maxProcesses' => 5,
+            ],
+            'supervisor-generate' => [
                 'maxProcesses' => 10,
-                'balanceMaxShift' => 1,
-                'balanceCooldown' => 3,
+            ],
+            'supervisor-poll' => [
+                'maxProcesses' => 10,
+            ],
+            'supervisor-judge' => [
+                'maxProcesses' => 5,
             ],
             'supervisor-audio' => [
                 'maxProcesses' => 2,
@@ -237,8 +283,17 @@ return [
         ],
 
         'local' => [
-            'supervisor-1' => [
-                'maxProcesses' => 5,
+            'supervisor-default' => [
+                'maxProcesses' => 2,
+            ],
+            'supervisor-generate' => [
+                'maxProcesses' => 3,
+            ],
+            'supervisor-poll' => [
+                'maxProcesses' => 3,
+            ],
+            'supervisor-judge' => [
+                'maxProcesses' => 2,
             ],
             'supervisor-audio' => [
                 'maxProcesses' => 2,

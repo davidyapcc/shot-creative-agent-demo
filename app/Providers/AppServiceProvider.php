@@ -5,11 +5,8 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Contracts\AgentInterface;
-use App\Contracts\ImageProvider;
 use App\Contracts\ImageProviderInterface;
-use App\Contracts\Judge;
 use App\Contracts\JudgeInterface;
-use App\Contracts\VideoProvider;
 use App\Contracts\VideoProviderInterface;
 use App\Services\Agent\MockAgent;
 use App\Services\Providers\FfmpegMotionVideoProvider;
@@ -47,7 +44,6 @@ class AppServiceProvider extends ServiceProvider
         default => throw new InvalidArgumentException("Unsupported image provider [{$provider}]."),
       };
     });
-    $this->app->alias(ImageProviderInterface::class, ImageProvider::class);
 
     $this->app->bind(VideoProviderInterface::class, function ()
     {
@@ -62,7 +58,6 @@ class AppServiceProvider extends ServiceProvider
         default => throw new InvalidArgumentException("Unsupported video provider [{$provider}]."),
       };
     });
-    $this->app->alias(VideoProviderInterface::class, VideoProvider::class);
 
     $this->app->bind(JudgeInterface::class, function ()
     {
@@ -74,7 +69,6 @@ class AppServiceProvider extends ServiceProvider
         default => throw new InvalidArgumentException("Unsupported judge provider [{$provider}]."),
       };
     });
-    $this->app->alias(JudgeInterface::class, Judge::class);
   }
 
   /**

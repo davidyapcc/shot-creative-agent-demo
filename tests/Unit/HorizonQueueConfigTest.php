@@ -16,15 +16,13 @@ class HorizonQueueConfigTest extends TestCase
   {
     $config = require config_path('horizon.php');
 
-    $allQueues = array_merge(
-      $config['defaults']['supervisor-1']['queue'] ?? [],
-      $config['defaults']['supervisor-audio']['queue'] ?? [],
-    );
+    $defaults = $config['defaults'] ?? [];
 
-    $this->assertContains('generate', $allQueues);
-    $this->assertContains('poll', $allQueues);
-    $this->assertContains('judge', $allQueues);
-    $this->assertContains('audio', $allQueues);
+    $this->assertSame(['default'], $defaults['supervisor-default']['queue'] ?? []);
+    $this->assertSame(['generate'], $defaults['supervisor-generate']['queue'] ?? []);
+    $this->assertSame(['poll'], $defaults['supervisor-poll']['queue'] ?? []);
+    $this->assertSame(['judge'], $defaults['supervisor-judge']['queue'] ?? []);
+    $this->assertSame(['audio'], $defaults['supervisor-audio']['queue'] ?? []);
   }
 
   public function test_jobs_are_assigned_to_specified_queues(): void
