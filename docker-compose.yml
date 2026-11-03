@@ -44,10 +44,11 @@ services:
       minio:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "test -f /var/www/html/vendor/autoload.php"]
+      test: ["CMD-SHELL", "curl -fs http://localhost:8000/up || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 300s
 
   horizon:
     image: shot-creative-agent-demo-app

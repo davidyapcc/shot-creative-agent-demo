@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Contracts\AgentInterface;
 use App\Enums\BriefState;
 use App\Enums\ShotState;
 use App\Jobs\PlanBriefJob;
@@ -11,24 +12,22 @@ use App\Models\Brief;
 use App\Models\Shot;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Testing\TestResponse;
+use RuntimeException;
 use Tests\TestCase;
 
 class BriefApiTest extends TestCase
 {
   use RefreshDatabase;
 
+  private const RATE_LIMIT_PER_MINUTE = 60;
+
   public function test_post_briefs_validates_prompt_required(): void
   {
     $response = $this->postJson('/briefs', []);
 
-    $response->assertStatus(422)
-      ->assertJsonPath('success', false)
-      ->assertJsonStructure([
-        'error' => [
-          'message',
-          'details' => ['prompt'],
-        ],
-      ]);
+    $this->assertApiError($response, 422, 'validation_failed');
+    $response->assertJsonStructure(['error' => ['fields' => ['prompt']]]);
   }
 
   public function test_post_briefs_validates_prompt_max_length(): void
@@ -37,14 +36,8 @@ class BriefApiTest extends TestCase
       'prompt' => str_repeat('a', 1001),
     ]);
 
-    $response->assertStatus(422)
-      ->assertJsonPath('success', false)
-      ->assertJsonStructure([
-        'error' => [
-          'message',
-          'details' => ['prompt'],
-        ],
-      ]);
+    $this->assertApiError($response, 422, 'validation_failed');
+    $response->assertJsonStructure(['error' => ['fields' => ['prompt']]]);
   }
 
   public function test_post_briefs_persists_brief_and_only_enqueues_job(): void
@@ -107,8 +100,53 @@ class BriefApiTest extends TestCase
   {
     $response = $this->getJson('/briefs/9999');
 
-    $response->assertStatus(404)
+    $this->assertApiError($response, 404, 'not_found');
+  }
+
+  public function test_post_briefs_returns_429_error_shape_when_rate_limited(): void
+  {
+    Queue::fake();
+
+    for ($attempt = 0; $attempt < self::RATE_LIMIT_PER_MINUTE; $attempt++)
+    {
+      $this->getJson('/briefs/9999');
+    }
+
+    $response = $this->getJson('/briefs/9999');
+
+    $this->assertApiError($response, 429, 'too_many_requests');
+  }
+
+  public function test_unexpected_error_returns_500_error_shape_without_leaking_details(): void
+  {
+    $this->app->bind(AgentInterface::class, fn () => new class implements AgentInterface
+    {
+      public function planShots(string $prompt): array
+      {
+        throw new RuntimeException('secret provider failure');
+      }
+
+      public function generateStyleAnchor(string $prompt): string
+      {
+        throw new RuntimeException('secret provider failure');
+      }
+    });
+
+    $response = $this->postJson('/briefs', [
+      'prompt' => '15s product teaser, rainy Tokyo, neon',
+    ]);
+
+    $this->assertApiError($response, 500, 'server_error');
+    $this->assertStringNotContainsString('secret provider failure', $response->getContent());
+  }
+
+  private function assertApiError(TestResponse $response, int $status, string $code): void
+  {
+    $response->assertStatus($status)
       ->assertJsonPath('success', false)
-      ->assertJsonPath('error.message', 'Resource not found.');
+      ->assertJsonPath('data', null)
+      ->assertJsonPath('meta', null)
+      ->assertJsonPath('error.code', $code)
+      ->assertJsonStructure(['error' => ['message']]);
   }
 }

@@ -74,6 +74,7 @@ class StateMachineTest extends TestCase
     ]);
 
     $this->expectException(InvalidStateTransitionException::class);
+    $this->expectExceptionMessage('Brief expects a BriefState, got ShotState.');
     $brief->transitionTo(ShotState::Pending);
   }
 

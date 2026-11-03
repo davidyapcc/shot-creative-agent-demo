@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use App\Contracts\AgentInterface;
 use App\Enums\BriefState;
+use App\Events\BriefStateChanged;
 use App\Enums\ShotState;
 use App\Jobs\GenerateAudioJob;
 use App\Jobs\MuxFinalVideoJob;
@@ -13,8 +14,10 @@ use App\Jobs\PlanBriefJob;
 use App\Jobs\ProcessKeyframesJob;
 use App\Jobs\RenderShotsJob;
 use App\Models\Brief;
+use App\Models\Shot;
 use Exception;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
@@ -129,5 +132,53 @@ class WalkingSkeletonTest extends TestCase
 
     $brief->refresh();
     $this->assertSame(BriefState::Failed, $brief->state);
+  }
+
+  public function test_job_failure_also_fails_unfinished_shots_and_keeps_done_shots(): void
+  {
+    $brief = Brief::create([
+      'prompt' => '15s product teaser, rainy Tokyo, neon',
+      'state' => BriefState::Rendering,
+    ]);
+    $inFlightShot = $this->createShot($brief, 1, ShotState::GeneratingVideo);
+    $doneShot = $this->createShot($brief, 2, ShotState::Done);
+
+    (new RenderShotsJob($brief->id))->failed(new Exception('Render provider timed out'));
+
+    $this->assertSame(BriefState::Failed, $brief->refresh()->state);
+    $this->assertSame(ShotState::Failed, $inFlightShot->refresh()->state);
+    $this->assertSame(ShotState::Done, $doneShot->refresh()->state);
+  }
+
+  public function test_brief_emits_state_changed_event_for_every_pipeline_stage_in_order(): void
+  {
+    Event::fake([BriefStateChanged::class]);
+
+    $this->postJson('/briefs', [
+      'prompt' => '15s product teaser, rainy Tokyo, neon',
+    ])->assertStatus(202);
+
+    $transitions = Event::dispatched(BriefStateChanged::class)
+      ->map(fn (array $args) => [$args[0]->from, $args[0]->to])
+      ->all();
+
+    $this->assertSame([
+      [BriefState::Pending, BriefState::Planning],
+      [BriefState::Planning, BriefState::Keyframes],
+      [BriefState::Keyframes, BriefState::Rendering],
+      [BriefState::Rendering, BriefState::Audio],
+      [BriefState::Audio, BriefState::Muxing],
+      [BriefState::Muxing, BriefState::Done],
+    ], $transitions);
+  }
+
+  private function createShot(Brief $brief, int $sequence, ShotState $state): Shot
+  {
+    return Shot::create([
+      'brief_id' => $brief->id,
+      'sequence' => $sequence,
+      'prompt' => "Shot {$sequence}: neon alley",
+      'state' => $state,
+    ]);
   }
 }

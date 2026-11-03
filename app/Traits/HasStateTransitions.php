@@ -14,7 +14,16 @@ trait HasStateTransitions
    */
   public function transitionTo(BackedEnum $target): void
   {
-    if (!($target instanceof ($this->state::class)) || !$this->state->canTransitionTo($target))
+    if (!($target instanceof ($this->state::class)))
+    {
+      throw InvalidStateTransitionException::mismatchedStateType(
+        class_basename($this),
+        class_basename($this->state),
+        class_basename($target),
+      );
+    }
+
+    if (!$this->state->canTransitionTo($target))
     {
       throw InvalidStateTransitionException::fromStates(
         $this->state->value,

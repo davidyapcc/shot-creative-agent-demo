@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\BriefState;
+use App\Events\BriefStateChanged;
 use App\Traits\HasStateTransitions;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -32,6 +33,17 @@ class Brief extends Model
       'metadata' => 'array',
       'budget_used' => 'integer',
     ];
+  }
+
+  protected static function booted(): void
+  {
+    static::updated(function (Brief $brief): void
+    {
+      if ($brief->wasChanged('state'))
+      {
+        BriefStateChanged::dispatch($brief->id, $brief->getOriginal('state'), $brief->state);
+      }
+    });
   }
 
   public function shots(): HasMany

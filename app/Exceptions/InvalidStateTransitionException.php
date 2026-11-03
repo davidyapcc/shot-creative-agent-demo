@@ -12,4 +12,9 @@ class InvalidStateTransitionException extends DomainException
   {
     return new self("Cannot transition {$entity} from '{$from}' to '{$to}'.");
   }
+
+  public static function mismatchedStateType(string $entity, string $expected, string $given): self
+  {
+    return new self("{$entity} expects a {$expected}, got {$given}.");
+  }
 }
