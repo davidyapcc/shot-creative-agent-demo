@@ -25,6 +25,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use RuntimeException;
 use Tests\TestCase;
 
 class DummyWorkerFollowUpJob implements ShouldQueue
@@ -248,7 +249,7 @@ class PollVideoRenderJobTest extends TestCase
     $provider = $this->createMock(VideoProviderInterface::class);
     $provider->expects($this->exactly(3))
       ->method('poll')
-      ->willThrowException(new \RuntimeException('Transient provider outage'));
+      ->willThrowException(new RuntimeException('Transient provider outage'));
     $this->app->instance(VideoProviderInterface::class, $provider);
 
     Queue::push(new PollVideoRenderJob($shot->id, 'retry-exception-id', $brief->id));

@@ -13,10 +13,12 @@ use App\Jobs\GenerateAudioJob;
 use App\Jobs\RenderShotsJob;
 use App\Models\Brief;
 use App\Models\Shot;
+use Illuminate\Bus\Batch;
 use Illuminate\Bus\PendingBatch;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Queue;
+use RuntimeException;
 use Tests\TestCase;
 
 class RenderShotsJobTest extends TestCase
@@ -82,7 +84,7 @@ class RenderShotsJobTest extends TestCase
     ]);
 
     $callback = new AdvanceBriefToAudioCallback($brief->id);
-    $batch = $this->createMock(\Illuminate\Bus\Batch::class);
+    $batch = $this->createMock(Batch::class);
 
     $callback($batch);
 
@@ -100,7 +102,7 @@ class RenderShotsJobTest extends TestCase
     ]);
 
     $callback = new AdvanceBriefToAudioCallback($brief->id);
-    $batch = $this->createMock(\Illuminate\Bus\Batch::class);
+    $batch = $this->createMock(Batch::class);
 
     $callback($batch);
 
@@ -123,9 +125,9 @@ class RenderShotsJobTest extends TestCase
     ]);
 
     $callback = new FailBriefOnBatchFailureCallback($brief->id);
-    $batch = $this->createMock(\Illuminate\Bus\Batch::class);
+    $batch = $this->createMock(Batch::class);
 
-    $callback($batch, new \RuntimeException('Batch worker crashed'));
+    $callback($batch, new RuntimeException('Batch worker crashed'));
 
     $this->assertSame(BriefState::Failed, $brief->refresh()->state);
     $this->assertSame(ShotState::Failed, $shot->refresh()->state);
