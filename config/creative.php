@@ -14,4 +14,5 @@ return [
   'image' => env('IMAGE_PROVIDER', 'replay'),
   'video' => env('VIDEO_PROVIDER', 'replay'),
   'audio' => env('AUDIO_PROVIDER', 'replay'),
+  'replay_pending_polls' => env('REPLAY_PENDING_POLLS') !== null ? (int) env('REPLAY_PENDING_POLLS') : null,
 ];

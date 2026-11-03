@@ -19,6 +19,7 @@ class GenerateAudioJob implements ShouldQueue
     public readonly int $briefId,
   )
   {
+    $this->onQueue('audio');
   }
 
   public function handle(): void
