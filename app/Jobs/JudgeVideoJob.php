@@ -42,19 +42,7 @@ class JudgeVideoJob implements ShouldQueue
 
     $shot = Shot::with('brief')->findOrFail($this->shotId);
 
-    if ($shot->state === ShotState::Failed || $shot->brief?->isBudgetExhausted())
-    {
-      return;
-    }
-
-    if ($shot->brief !== null && !app(Budget::class)->chargeOrDegrade($shot->brief, 'judge', 'judgeVideo'))
-    {
-      return;
-    }
-
-    $shot->refresh();
-
-    if ($shot->state === ShotState::Failed)
+    if (!app(Budget::class)->chargeShotStep($shot, 'judge', 'judgeVideo'))
     {
       return;
     }

@@ -7,7 +7,6 @@ namespace App\Jobs;
 use App\Contracts\AgentInterface;
 use App\Contracts\JudgeInterface;
 use App\Enums\JudgementStage;
-use App\Enums\ShotState;
 use App\Events\JudgeVerdictRecorded;
 use App\Events\ShotUpdated;
 use App\Models\Judgement;
@@ -42,19 +41,7 @@ class JudgeKeyframeJob implements ShouldQueue
 
     $shot = Shot::with('brief')->findOrFail($this->shotId);
 
-    if ($shot->state === ShotState::Failed || $shot->brief?->isBudgetExhausted())
-    {
-      return;
-    }
-
-    if ($shot->brief !== null && !app(Budget::class)->chargeOrDegrade($shot->brief, 'judge', 'judgeImage'))
-    {
-      return;
-    }
-
-    $shot->refresh();
-
-    if ($shot->state === ShotState::Failed)
+    if (!app(Budget::class)->chargeShotStep($shot, 'judge', 'judgeImage'))
     {
       return;
     }

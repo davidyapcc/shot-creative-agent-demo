@@ -49,6 +49,22 @@ class Shot extends Model
   }
 
   /**
+   * Count one more run of a step ('image' or 'video'), in total and per step.
+   *
+   * @param array<string, mixed> $metadata extra metadata to store in the same update
+   */
+  public function recordStepAttempt(string $step, array $metadata = []): void
+  {
+    $merged = array_merge($this->metadata ?? [], $metadata);
+    $merged['step_attempts'][$step] = (int) ($merged['step_attempts'][$step] ?? 0) + 1;
+
+    $this->update([
+      'attempts' => (int) $this->attempts + 1,
+      'metadata' => $merged,
+    ]);
+  }
+
+  /**
    * Move on after a provider call, unless the budget stop failed this shot
    * while the call was in flight. Returns false when the result must be dropped.
    */

@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\ShotState;
 use App\Exceptions\BudgetExceededException;
 use App\Models\Brief;
+use App\Models\Shot;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -69,6 +71,30 @@ class Budget
     $brief->refresh();
 
     return true;
+  }
+
+  /**
+   * Charge one paid shot step. Returns false when the step must not run: the
+   * shot already failed, the brief hit its budget stop (now or before), or the
+   * stop failed this shot while the charge was being taken.
+   */
+  public function chargeShotStep(Shot $shot, string $provider, string $operation): bool
+  {
+    $shot->loadMissing('brief');
+
+    if ($shot->state === ShotState::Failed || $shot->brief?->isBudgetExhausted())
+    {
+      return false;
+    }
+
+    if ($shot->brief !== null && !$this->chargeOrDegrade($shot->brief, $provider, $operation))
+    {
+      return false;
+    }
+
+    $shot->refresh();
+
+    return $shot->state !== ShotState::Failed;
   }
 
   /**

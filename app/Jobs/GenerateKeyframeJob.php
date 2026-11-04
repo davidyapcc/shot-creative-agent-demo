@@ -38,30 +38,12 @@ class GenerateKeyframeJob implements ShouldQueue
 
     $shot = Shot::with('brief')->findOrFail($this->shotId);
 
-    if ($shot->state === ShotState::Failed || $shot->brief?->isBudgetExhausted())
+    if (!app(Budget::class)->chargeShotStep($shot, 'image', 'generateImage'))
     {
       return;
     }
 
-    if ($shot->brief !== null && !app(Budget::class)->chargeOrDegrade($shot->brief, 'image', 'generateImage'))
-    {
-      return;
-    }
-
-    $shot->refresh();
-
-    if ($shot->state === ShotState::Failed)
-    {
-      return;
-    }
-
-    $metadata = $shot->metadata ?? [];
-    $imageAttempts = (int) ($metadata['step_attempts']['image'] ?? 0) + 1;
-    $metadata['step_attempts']['image'] = $imageAttempts;
-    $shot->update([
-      'attempts' => (int) $shot->attempts + 1,
-      'metadata' => $metadata,
-    ]);
+    $shot->recordStepAttempt('image');
 
     if ($shot->state->canTransitionTo(ShotState::GeneratingImage))
     {

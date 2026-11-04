@@ -71,12 +71,7 @@ class PollVideoRenderJob implements ShouldQueue
 
     $shot = Shot::with('brief')->find($this->shotId);
 
-    if ($shot === null || $shot->state === ShotState::Failed || $shot->brief?->isBudgetExhausted())
-    {
-      return;
-    }
-
-    if ($shot->brief !== null && !app(Budget::class)->chargeOrDegrade($shot->brief, 'video', 'poll'))
+    if ($shot === null || !app(Budget::class)->chargeShotStep($shot, 'video', 'poll'))
     {
       return;
     }
