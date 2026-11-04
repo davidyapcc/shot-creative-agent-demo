@@ -1,0 +1,16 @@
+{
+  "image": {
+    "fail_when_prompt_starts_with": "Shot 1:",
+    "pass_when_prompt_contains": "Simplify only this failure",
+    "failure": {
+      "scores": {
+        "prompt_adherence": 4,
+        "anatomy": 2,
+        "object_integrity": 5
+      },
+      "hard_fail_tags": ["anatomy"],
+      "reason": "Left hand has six fingers.",
+      "verdict": "fail"
+    }
+  }
+}

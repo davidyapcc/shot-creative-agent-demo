@@ -6,9 +6,8 @@ namespace App\Jobs;
 
 use App\Contracts\VideoProviderInterface;
 use App\Enums\ShotState;
-use App\Events\ShotUpdated;
-use App\Events\VideoProgressUpdated;
 use App\Models\Brief;
+use App\Services\ShotVideoSubmitter;
 use App\Traits\FailsBriefOnJobFailure;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -29,26 +28,23 @@ class RenderShotsJob implements ShouldQueue
   public function handle(VideoProviderInterface $videoProvider): void
   {
     $brief = Brief::with('shots')->findOrFail($this->briefId);
+    $submitter = app(ShotVideoSubmitter::class);
 
     $pollJobs = [];
 
     foreach ($brief->shots as $shot)
     {
-      if ($shot->state->canTransitionTo(ShotState::GeneratingVideo))
+      if (!$shot->state->canTransitionTo(ShotState::GeneratingVideo))
       {
-        $shot->transitionTo(ShotState::GeneratingVideo);
+        continue;
       }
 
-      $renderId = $videoProvider->submit($shot->prompt, (string) $shot->keyframe_path);
+      $poll = $submitter->submit($shot, $videoProvider);
 
-      $shot->update([
-        'metadata' => array_merge($shot->metadata ?? [], ['render_id' => $renderId]),
-      ]);
-
-      VideoProgressUpdated::dispatch($brief->id, $shot->id, 0);
-      ShotUpdated::dispatch($shot);
-
-      $pollJobs[] = new PollVideoRenderJob($shot->id, $renderId, $brief->id);
+      if ($poll !== null)
+      {
+        $pollJobs[] = $poll;
+      }
     }
 
     if (empty($pollJobs))

@@ -8,6 +8,7 @@ use App\Contracts\AudioProviderInterface;
 use App\Enums\BriefState;
 use App\Exceptions\ProviderRateLimitedException;
 use App\Models\Brief;
+use App\Services\Budget;
 use App\Traits\FailsBriefOnJobFailure;
 use DateTimeInterface;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -69,7 +70,19 @@ class GenerateAudioJob implements ShouldQueue
   {
     $brief = Brief::findOrFail($this->briefId);
 
+    if ($brief->metadata['budget_exhausted'] ?? false)
+    {
+      return;
+    }
+
     if ($brief->audio_path !== null || $brief->state !== BriefState::Audio)
+    {
+      return;
+    }
+
+    $budget = app(Budget::class);
+
+    if (!$budget->chargeOrDegrade($brief, 'audio', 'generate'))
     {
       return;
     }
@@ -79,6 +92,8 @@ class GenerateAudioJob implements ShouldQueue
 
     if (!$this->claim($brief->id, $voiceoverPath, $soundEffectPath))
     {
+      $budget->refund($brief, 'audio', 'generate');
+
       return;
     }
 
@@ -88,7 +103,8 @@ class GenerateAudioJob implements ShouldQueue
     }
     catch (ProviderRateLimitedException $exception)
     {
-      // A refused request spent no quota, so give the claim back for the retry.
+      // A refused request spent no quota, so give the claim and the charge back.
+      $budget->refund($brief, 'audio', 'generate');
       $this->releaseClaim($brief->id);
 
       throw $exception;

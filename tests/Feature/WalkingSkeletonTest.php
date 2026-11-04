@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Contracts\AgentInterface;
+use App\Services\Budget;
 use App\Contracts\AudioProviderInterface;
 use App\Contracts\ImageProviderInterface;
 use App\Contracts\JudgeInterface;
@@ -67,10 +68,13 @@ class WalkingSkeletonTest extends TestCase
       $this->assertNotNull($shot->video_path);
       Storage::disk('s3')->assertExists($shot->keyframe_path);
       Storage::disk('s3')->assertExists($shot->video_path);
-      $this->assertCount(2, $shot->judgements);
     }
 
-    $this->assertDatabaseCount('judgements', 6);
+    $brief->load('shots.judgements');
+    $this->assertCount(3, $brief->shots[0]->judgements);
+    $this->assertCount(2, $brief->shots[1]->judgements);
+    $this->assertCount(2, $brief->shots[2]->judgements);
+    $this->assertDatabaseCount('judgements', 7);
 
     $getResponse = $this->getJson("/briefs/{$briefId}");
     $getResponse->assertStatus(200)
@@ -103,7 +107,7 @@ class WalkingSkeletonTest extends TestCase
     // Stage 1: Planning
     $agent = app(AgentInterface::class);
     $planJob = new PlanBriefJob($brief->id);
-    $planJob->handle($agent);
+    $planJob->handle($agent, app(Budget::class));
 
     $brief->refresh();
     $this->assertSame(BriefState::Keyframes, $brief->state);

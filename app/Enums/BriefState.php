@@ -24,7 +24,7 @@ enum BriefState: string
     return match ($this)
     {
       self::Pending => in_array($target, [self::Planning, self::Failed], true),
-      self::Planning => in_array($target, [self::Keyframes, self::Failed], true),
+      self::Planning => in_array($target, [self::Keyframes, self::Degraded, self::Failed], true),
       self::Keyframes => in_array($target, [self::Rendering, self::Degraded, self::Failed], true),
       self::Rendering => in_array($target, [self::Audio, self::Degraded, self::Failed], true),
       self::Audio => in_array($target, [self::Muxing, self::Degraded, self::Failed], true),

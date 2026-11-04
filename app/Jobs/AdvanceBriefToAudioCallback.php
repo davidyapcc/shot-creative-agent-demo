@@ -25,7 +25,7 @@ class AdvanceBriefToAudioCallback
 
     $brief = Brief::find($this->briefId);
 
-    if ($brief !== null && $brief->state === BriefState::Rendering)
+    if ($brief !== null && !($brief->metadata['budget_exhausted'] ?? false) && $brief->state === BriefState::Rendering)
     {
       $brief->transitionTo(BriefState::Audio);
       GenerateAudioJob::dispatch($this->briefId);

@@ -156,6 +156,35 @@ describe('LiveProgressApp', () =>
     expect(wrapper.text()).toContain('video progress 60%');
     expect(wrapper.text()).toContain('video 60%');
     expect(wrapper.text()).toContain('judging (fail: anatomy)');
+    expect(wrapper.text()).not.toContain('regenerating');
+  });
+
+  it('shows regenerating while a failed shot is generated again', async () =>
+  {
+    const mockBrief = { id: 77, prompt: 'Sample prompt', state: 'keyframes', shots: [] };
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ success: true, data: { brief: mockBrief } }),
+    });
+
+    const wrapper = mount(LiveProgressApp);
+    await submitPrompt(wrapper);
+    await flushPromises();
+
+    mockListeners['.ShotUpdated']({
+      shot: {
+        id: 101,
+        sequence: 1,
+        prompt: 'Shot 1 prompt',
+        state: 'generating_image',
+        attempts: 2,
+      },
+    });
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.text()).toContain('regenerating');
+    expect(wrapper.text()).toContain('Attempt 2');
   });
 
   it('displays error message when brief submission fails', async () =>

@@ -162,6 +162,11 @@ class BriefApiTest extends TestCase
       {
         throw new RuntimeException('secret provider failure');
       }
+
+      public function rewritePrompt(array $context): string
+      {
+        throw new RuntimeException('secret provider failure');
+      }
     });
 
     $response = $this->postJson('/briefs', [

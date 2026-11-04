@@ -22,11 +22,13 @@ use App\Jobs\GenerateKeyframeJob;
 use App\Jobs\JudgeKeyframeJob;
 use App\Jobs\JudgeVideoJob;
 use App\Jobs\PlanBriefJob;
+use App\Services\Budget;
 use App\Jobs\PollVideoRenderJob;
 use App\Jobs\ProcessKeyframesJob;
 use App\Models\Brief;
 use App\Models\Shot;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -47,7 +49,7 @@ class PipelineBroadcastsTest extends TestCase
     ]);
 
     $agent = app(AgentInterface::class);
-    (new PlanBriefJob($brief->id))->handle($agent);
+    (new PlanBriefJob($brief->id))->handle($agent, app(Budget::class));
 
     Event::assertDispatched(ShotUpdated::class, 3);
   }
@@ -109,7 +111,9 @@ class PipelineBroadcastsTest extends TestCase
         verdict: JudgementVerdict::Fail,
       ));
 
-    (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge);
+    Bus::fake([GenerateKeyframeJob::class, JudgeKeyframeJob::class]);
+
+    (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, app(AgentInterface::class));
 
     Event::assertDispatched(
       JudgeVerdictRecorded::class,
@@ -196,7 +200,9 @@ class PipelineBroadcastsTest extends TestCase
         verdict: JudgementVerdict::Fail,
       ));
 
-    (new JudgeVideoJob($shot->id, $brief->id))->handle($judge);
+    Bus::fake([PollVideoRenderJob::class]);
+
+    (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, app(AgentInterface::class));
 
     Event::assertDispatched(
       JudgeVerdictRecorded::class,
