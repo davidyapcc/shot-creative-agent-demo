@@ -78,7 +78,10 @@ class GenerateKeyframeJob implements ShouldQueue
       'keyframe_path' => $keyframePath,
     ]);
 
-    $shot->transitionTo(ShotState::JudgingImage);
+    if (!$shot->advanceUnlessStopped(ShotState::JudgingImage))
+    {
+      return;
+    }
 
     ShotUpdated::dispatch($shot);
   }

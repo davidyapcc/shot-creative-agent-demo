@@ -76,8 +76,10 @@ class JudgeVideoJob implements ShouldQueue
 
     if ($verdict->isPass())
     {
-      $shot->transitionTo(ShotState::Done);
-      ShotUpdated::dispatch($shot);
+      if ($shot->advanceUnlessStopped(ShotState::Done))
+      {
+        ShotUpdated::dispatch($shot);
+      }
     }
     else
     {

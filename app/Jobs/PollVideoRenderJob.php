@@ -116,7 +116,10 @@ class PollVideoRenderJob implements ShouldQueue
       'video_path' => $videoPath,
     ]);
 
-    $shot->transitionTo(ShotState::JudgingVideo);
+    if (!$shot->advanceUnlessStopped(ShotState::JudgingVideo))
+    {
+      return;
+    }
 
     VideoProgressUpdated::dispatch($this->briefId, $this->shotId, self::COMPLETED_PROGRESS);
     ShotUpdated::dispatch($shot);

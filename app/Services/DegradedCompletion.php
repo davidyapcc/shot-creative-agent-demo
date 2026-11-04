@@ -45,7 +45,8 @@ class DegradedCompletion
         'metadata' => $metadata,
       ]);
 
-      $locked->shots()->get()->each(function (Shot $shot): void
+      // Lock the shots too, so a late job's advanceUnlessStopped waits for this.
+      $locked->shots()->lockForUpdate()->get()->each(function (Shot $shot): void
       {
         if ($shot->state !== ShotState::Done && $shot->state->canTransitionTo(ShotState::Failed))
         {
