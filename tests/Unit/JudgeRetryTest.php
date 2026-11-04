@@ -261,7 +261,7 @@ class JudgeRetryTest extends TestCase
     $this->assertSame(BriefState::Rendering, $brief->refresh()->state);
     $this->assertSame(ShotState::Done, $other->refresh()->state);
     $this->assertSame(ShotState::GeneratingVideo, $shot->refresh()->state);
-    $this->assertSame(2, $shot->attempts);
+    $this->assertSame(3, $shot->attempts);
     $this->assertSame(2, $shot->metadata['step_attempts']['image']);
     $this->assertSame(2, $shot->metadata['step_attempts']['video']);
 

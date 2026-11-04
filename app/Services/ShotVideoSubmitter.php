@@ -58,7 +58,7 @@ class ShotVideoSubmitter
     $metadata['render_id'] = $renderId;
 
     $shot->update([
-      'attempts' => $videoAttempts,
+      'attempts' => (int) $shot->attempts + 1,
       'metadata' => $metadata,
     ]);
 

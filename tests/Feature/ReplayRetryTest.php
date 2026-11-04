@@ -38,6 +38,7 @@ class ReplayRetryTest extends TestCase
     $this->assertStringContainsString('Simplify only this failure', $shot->prompt);
     $this->assertSame(2, $shot->metadata['step_attempts']['image']);
     $this->assertSame(1, $shot->metadata['step_attempts']['video']);
+    $this->assertSame(3, $shot->attempts);
     $this->assertSame([
       ['prompt' => 'Shot 1: Wide establishing shot setting the scene. 15s product teaser, rainy Tokyo, neon', 'reason' => 'Left hand has six fingers.'],
     ], $shot->metadata['prompt_attempts']['image']);

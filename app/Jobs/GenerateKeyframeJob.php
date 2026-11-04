@@ -59,7 +59,7 @@ class GenerateKeyframeJob implements ShouldQueue
     $imageAttempts = (int) ($metadata['step_attempts']['image'] ?? 0) + 1;
     $metadata['step_attempts']['image'] = $imageAttempts;
     $shot->update([
-      'attempts' => $imageAttempts,
+      'attempts' => (int) $shot->attempts + 1,
       'metadata' => $metadata,
     ]);
 
