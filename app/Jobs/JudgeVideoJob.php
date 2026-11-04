@@ -42,7 +42,7 @@ class JudgeVideoJob implements ShouldQueue
 
     $shot = Shot::with('brief')->findOrFail($this->shotId);
 
-    if ($shot->state === ShotState::Failed || ($shot->brief?->metadata['budget_exhausted'] ?? false))
+    if ($shot->state === ShotState::Failed || $shot->brief?->isBudgetExhausted())
     {
       return;
     }

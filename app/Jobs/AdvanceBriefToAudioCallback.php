@@ -26,7 +26,7 @@ class AdvanceBriefToAudioCallback
 
     $brief = Brief::find($this->briefId);
 
-    if ($brief === null || ($brief->metadata['budget_exhausted'] ?? false) || $brief->state !== BriefState::Rendering)
+    if ($brief === null || $brief->isBudgetExhausted() || $brief->state !== BriefState::Rendering)
     {
       return;
     }

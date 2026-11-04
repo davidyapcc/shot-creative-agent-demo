@@ -70,7 +70,7 @@ class GenerateAudioJob implements ShouldQueue
   {
     $brief = Brief::findOrFail($this->briefId);
 
-    if ($brief->metadata['budget_exhausted'] ?? false)
+    if ($brief->isBudgetExhausted())
     {
       return;
     }

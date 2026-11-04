@@ -54,6 +54,14 @@ class Brief extends Model
   }
 
   /**
+   * Whether the provider budget stop has already fired for this brief.
+   */
+  public function isBudgetExhausted(): bool
+  {
+    return (bool) ($this->metadata['budget_exhausted'] ?? false);
+  }
+
+  /**
    * Whether at least one shot passed its video judge, so there is a clip to mux.
    */
   public function hasPassingClip(): bool

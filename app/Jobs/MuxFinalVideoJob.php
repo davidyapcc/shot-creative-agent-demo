@@ -49,7 +49,7 @@ class MuxFinalVideoJob implements ShouldQueue
       return;
     }
 
-    $exhausted = (bool) ($brief->metadata['budget_exhausted'] ?? false);
+    $exhausted = $brief->isBudgetExhausted();
     $clips = $this->passingClips($brief);
 
     if ($exhausted && !$this->hasAudio($brief))
@@ -70,7 +70,7 @@ class MuxFinalVideoJob implements ShouldQueue
     ]);
     $brief->refresh();
     $brief->transitionTo(
-      ($brief->metadata['budget_exhausted'] ?? false) ? BriefState::Degraded : BriefState::Done,
+      $brief->isBudgetExhausted() ? BriefState::Degraded : BriefState::Done,
     );
   }
 

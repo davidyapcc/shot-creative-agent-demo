@@ -25,7 +25,7 @@ class DegradedCompletion
       return;
     }
 
-    if ($brief->metadata['budget_exhausted'] ?? false)
+    if ($brief->isBudgetExhausted())
     {
       return;
     }
@@ -34,7 +34,7 @@ class DegradedCompletion
     {
       $locked = Brief::query()->whereKey($brief->id)->lockForUpdate()->firstOrFail();
 
-      if ($locked->metadata['budget_exhausted'] ?? false)
+      if ($locked->isBudgetExhausted())
       {
         return;
       }

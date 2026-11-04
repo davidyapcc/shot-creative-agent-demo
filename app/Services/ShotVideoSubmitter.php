@@ -28,7 +28,7 @@ class ShotVideoSubmitter
       return null;
     }
 
-    if ($shot->brief->metadata['budget_exhausted'] ?? false)
+    if ($shot->brief->isBudgetExhausted())
     {
       return null;
     }

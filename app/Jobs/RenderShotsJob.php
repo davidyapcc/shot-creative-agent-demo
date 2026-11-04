@@ -70,7 +70,7 @@ class RenderShotsJob implements ShouldQueue
   {
     $brief->refresh();
 
-    if ($brief->metadata['budget_exhausted'] ?? false)
+    if ($brief->isBudgetExhausted())
     {
       return;
     }
