@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Contracts\AgentInterface;
+use App\Contracts\AudioProviderInterface;
 use App\Contracts\ImageProviderInterface;
 use App\Contracts\JudgeInterface;
 use App\Contracts\VideoProviderInterface;
 use App\Services\Agent\MockAgent;
 use App\Services\Providers\FfmpegMotionVideoProvider;
+use App\Services\Providers\ReplayAudioProvider;
 use App\Services\Providers\ReplayImageProvider;
 use App\Services\Providers\ReplayJudge;
 use App\Services\Providers\ReplayVideoProvider;
@@ -56,6 +58,17 @@ class AppServiceProvider extends ServiceProvider
         ),
         'ffmpeg_motion' => new FfmpegMotionVideoProvider(),
         default => throw new InvalidArgumentException("Unsupported video provider [{$provider}]."),
+      };
+    });
+
+    $this->app->bind(AudioProviderInterface::class, function ()
+    {
+      $provider = config('creative.audio', 'replay');
+
+      return match ($provider)
+      {
+        'replay' => new ReplayAudioProvider(),
+        default => throw new InvalidArgumentException("Unsupported audio provider [{$provider}]."),
       };
     });
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Contracts\AgentInterface;
+use App\Contracts\AudioProviderInterface;
 use App\Contracts\ImageProviderInterface;
 use App\Contracts\JudgeInterface;
 use App\Contracts\VideoProviderInterface;
@@ -54,6 +55,10 @@ class WalkingSkeletonTest extends TestCase
     $this->assertNotNull($brief->style_anchor);
     $this->assertNotNull($brief->audio_path);
     $this->assertNotNull($brief->final_video_path);
+    $this->assertIsString($brief->metadata['sound_effect_path'] ?? null);
+    Storage::disk('s3')->assertExists($brief->audio_path);
+    Storage::disk('s3')->assertExists($brief->metadata['sound_effect_path']);
+    Storage::disk('s3')->assertExists($brief->final_video_path);
 
     foreach ($brief->shots as $shot)
     {
@@ -79,6 +84,8 @@ class WalkingSkeletonTest extends TestCase
 
   public function test_brief_transitions_through_each_pipeline_stage_sequentially(): void
   {
+    Storage::fake('s3');
+
     Queue::fake([
       ProcessKeyframesJob::class,
       RenderShotsJob::class,
@@ -127,7 +134,7 @@ class WalkingSkeletonTest extends TestCase
 
     // Stage 4: Audio
     $audioJob = new GenerateAudioJob($brief->id);
-    $audioJob->handle();
+    $audioJob->handle(app(AudioProviderInterface::class));
 
     $brief->refresh();
     $this->assertSame(BriefState::Muxing, $brief->state);
@@ -175,6 +182,7 @@ class WalkingSkeletonTest extends TestCase
 
   public function test_brief_emits_state_changed_event_for_every_pipeline_stage_in_order(): void
   {
+    Storage::fake('s3');
     Event::fake([BriefStateChanged::class]);
 
     $this->postJson('/briefs', [
