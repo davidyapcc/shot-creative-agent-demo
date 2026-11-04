@@ -47,11 +47,43 @@ class ReplayRetryTest extends TestCase
     $this->assertCount(1, $brief->shots[2]->judgements->where('stage', 'image'));
     $this->assertNotNull($brief->final_video_path);
 
-    $this->assertSame(21, $brief->budget_used);
-    $this->assertCount(21, $brief->metadata['budget_ledger']);
+    // Shot 1's image retry costs 3 units (rewrite, regenerate, re-judge) and
+    // Shot 2's video retry costs 4 (rewrite, submit, poll, re-judge), on top
+    // of the 18 a brief with no retries uses.
+    $this->assertSame(25, $brief->budget_used);
+    $this->assertCount(25, $brief->metadata['budget_ledger']);
     $this->assertSame(
       ['agent', 'audio', 'image', 'judge', 'video'],
       collect($brief->metadata['budget_ledger'])->pluck('provider')->unique()->sort()->values()->all(),
     );
+  }
+
+  public function test_replay_fixture_fails_shot_two_video_then_passes_the_rewrite(): void
+  {
+    // Arrange
+    Storage::fake('s3');
+
+    // Act
+    $this->postJson('/briefs', [
+      'prompt' => '15s product teaser, rainy Tokyo, neon',
+    ])->assertStatus(202);
+
+    // Assert
+    $brief = Brief::with('shots.judgements')->firstOrFail();
+    $shot = $brief->shots[1];
+    $videoJudgements = $shot->judgements->where('stage', 'video')->values();
+
+    $this->assertSame(BriefState::Done, $brief->state);
+    $this->assertSame(ShotState::Done, $shot->state);
+    $this->assertCount(2, $videoJudgements);
+    $this->assertSame('fail', $videoJudgements[0]->verdict);
+    $this->assertSame(['temporal_flicker'], $videoJudgements[0]->hard_fail_tags);
+    $this->assertSame('pass', $videoJudgements[1]->verdict);
+    $this->assertStringContainsString('Simplify only this failure', $shot->prompt);
+    $this->assertSame(1, $shot->metadata['step_attempts']['image']);
+    $this->assertSame(2, $shot->metadata['step_attempts']['video']);
+    $this->assertSame(3, $shot->attempts);
+    $this->assertCount(1, $brief->shots[0]->judgements->where('stage', 'video'));
+    $this->assertCount(1, $brief->shots[2]->judgements->where('stage', 'video'));
   }
 }

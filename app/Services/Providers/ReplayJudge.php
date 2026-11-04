@@ -6,19 +6,22 @@ namespace App\Services\Providers;
 
 use App\Contracts\JudgeInterface;
 use App\DTOs\JudgementResult;
+use RuntimeException;
 
 class ReplayJudge implements JudgeInterface
 {
+  private const FIXTURE_PATH = 'fixtures/replay/judge.json';
+
+  private readonly string $fixturePath;
+
+  public function __construct(?string $fixturePath = null)
+  {
+    $this->fixturePath = $fixturePath ?? base_path(self::FIXTURE_PATH);
+  }
+
   public function judgeImage(string $imagePath, string $prompt, ?string $styleAnchor = null): JudgementResult
   {
-    $failure = $this->scriptedImageFailure($prompt);
-
-    if ($failure !== null)
-    {
-      return $failure;
-    }
-
-    return new JudgementResult(
+    return $this->scriptedFailure('image', $prompt) ?? new JudgementResult(
       scores: [
         'prompt_adherence' => 5,
         'anatomy' => 5,
@@ -29,27 +32,43 @@ class ReplayJudge implements JudgeInterface
     );
   }
 
-  private function scriptedImageFailure(string $prompt): ?JudgementResult
+  public function judgeVideo(string $videoPath, string $prompt, ?string $styleAnchor = null): JudgementResult
   {
-    $path = base_path('fixtures/replay/judge.json');
-    $decoded = json_decode((string) file_get_contents($path), true);
-    $image = is_array($decoded) ? ($decoded['image'] ?? null) : null;
+    return $this->scriptedFailure('video', $prompt) ?? new JudgementResult(
+      scores: [
+        'prompt_adherence' => 5,
+        'anatomy' => 5,
+        'object_integrity' => 5,
+        'temporal_consistency' => 5,
+      ],
+      hardFailTags: [],
+      reason: 'Replay verdict: video adheres to prompt with no temporal flicker.',
+    );
+  }
 
-    if (!is_array($image))
+  /**
+   * The fixture fails a step once for prompts with the given prefix, and
+   * passes the rewrite, which carries the agent's simplify marker.
+   */
+  private function scriptedFailure(string $step, string $prompt): ?JudgementResult
+  {
+    $script = $this->fixture()[$step] ?? null;
+
+    if ($script === null)
     {
       return null;
     }
 
-    $prefix = (string) ($image['fail_when_prompt_starts_with'] ?? '');
-    $marker = (string) ($image['pass_when_prompt_contains'] ?? '');
-    $failure = $image['failure'] ?? null;
+    $prefix = $script['fail_when_prompt_starts_with'] ?? null;
+    $marker = $script['pass_when_prompt_contains'] ?? null;
+    $failure = $script['failure'] ?? null;
 
-    if ($prefix === '' || !is_array($failure) || !str_starts_with($prompt, $prefix))
+    if (!is_string($prefix) || $prefix === '' || !is_string($marker) || !$this->isValidFailure($failure))
     {
-      return null;
+      throw new RuntimeException("Replay judge fixture has a malformed [{$step}] entry: {$this->fixturePath}");
     }
 
-    if ($marker !== '' && str_contains($prompt, $marker))
+    if (!str_starts_with($prompt, $prefix) || str_contains($prompt, $marker))
     {
       return null;
     }
@@ -61,17 +80,33 @@ class ReplayJudge implements JudgeInterface
     );
   }
 
-  public function judgeVideo(string $videoPath, string $prompt, ?string $styleAnchor = null): JudgementResult
+  /**
+   * @return array<string, mixed>
+   */
+  private function fixture(): array
   {
-    return new JudgementResult(
-      scores: [
-        'prompt_adherence' => 5,
-        'anatomy' => 5,
-        'object_integrity' => 5,
-        'temporal_consistency' => 5,
-      ],
-      hardFailTags: [],
-      reason: 'Replay verdict: video adheres to prompt with no temporal flicker.',
-    );
+    $contents = is_file($this->fixturePath) ? file_get_contents($this->fixturePath) : false;
+
+    if ($contents === false)
+    {
+      throw new RuntimeException("Replay judge fixture is missing: {$this->fixturePath}");
+    }
+
+    $decoded = json_decode($contents, true);
+
+    if (!is_array($decoded))
+    {
+      throw new RuntimeException("Replay judge fixture is not valid JSON: {$this->fixturePath}");
+    }
+
+    return $decoded;
+  }
+
+  private function isValidFailure(mixed $failure): bool
+  {
+    return is_array($failure)
+      && is_array($failure['scores'] ?? null)
+      && is_array($failure['hard_fail_tags'] ?? null)
+      && is_string($failure['reason'] ?? null);
   }
 }

@@ -12,5 +12,20 @@
       "reason": "Left hand has six fingers.",
       "verdict": "fail"
     }
+  },
+  "video": {
+    "fail_when_prompt_starts_with": "Shot 2:",
+    "pass_when_prompt_contains": "Simplify only this failure",
+    "failure": {
+      "scores": {
+        "prompt_adherence": 4,
+        "anatomy": 5,
+        "object_integrity": 5,
+        "temporal_consistency": 2
+      },
+      "hard_fail_tags": ["temporal_flicker"],
+      "reason": "Neon sign flickers between frames.",
+      "verdict": "fail"
+    }
   }
 }

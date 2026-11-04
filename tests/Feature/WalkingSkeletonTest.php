@@ -71,10 +71,11 @@ class WalkingSkeletonTest extends TestCase
     }
 
     $brief->load('shots.judgements');
+    // The replay fixture retries Shot 1's image and Shot 2's video once each.
     $this->assertCount(3, $brief->shots[0]->judgements);
-    $this->assertCount(2, $brief->shots[1]->judgements);
+    $this->assertCount(3, $brief->shots[1]->judgements);
     $this->assertCount(2, $brief->shots[2]->judgements);
-    $this->assertDatabaseCount('judgements', 7);
+    $this->assertDatabaseCount('judgements', 8);
 
     $getResponse = $this->getJson("/briefs/{$briefId}");
     $getResponse->assertStatus(200)
