@@ -1,6 +1,6 @@
 import pipelineStates from './pipeline-states.json';
 
-// Values are generated from the PHP enums. See FrontendEnumCatalog.
+// Written by `php artisan frontend:export-states` from the PHP enums.
 export const BriefState = Object.freeze(pipelineStates.brief);
 export const ShotState = Object.freeze(pipelineStates.shot);
 export const Verdict = Object.freeze(pipelineStates.verdict);

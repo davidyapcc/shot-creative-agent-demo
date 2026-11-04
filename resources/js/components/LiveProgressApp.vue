@@ -18,30 +18,6 @@
           </div>
         </div>
 
-        <!-- Connection & Active Brief Status -->
-        <div class="flex items-center gap-3 text-xs">
-          <div v-if="activeBriefId" class="hidden sm:flex items-center gap-1.5 rounded-full bg-zinc-800/80 px-3 py-1 font-mono text-[11px] border border-zinc-700/60">
-            <span class="text-zinc-400">Brief:</span>
-            <span class="text-indigo-300 font-semibold">#{{ activeBriefId }}</span>
-            <span class="text-zinc-500">|</span>
-            <span class="text-emerald-400">{{ briefState }}</span>
-          </div>
-
-          <!-- WebSocket Connection Status -->
-          <div class="flex items-center gap-1.5 rounded-full bg-zinc-800/80 px-2.5 py-1 text-[11px] font-mono border border-zinc-700/60">
-            <span
-              :class="[
-                'h-2 w-2 rounded-full',
-                connectionStatus === 'connected'
-                  ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)] animate-pulse'
-                  : connectionStatus === 'connecting'
-                    ? 'bg-amber-400 animate-ping'
-                    : 'bg-zinc-500'
-              ]"
-            ></span>
-            <span class="text-zinc-400 capitalize">{{ connectionStatus }}</span>
-          </div>
-        </div>
       </div>
     </header>
 
@@ -57,22 +33,6 @@
                 <span>Submit Creative Brief</span>
               </h2>
               <span class="text-[11px] text-zinc-500 font-mono">POST /briefs</span>
-            </div>
-
-            <!-- Preset prompts -->
-            <div class="mb-3">
-              <span class="text-[11px] text-zinc-400 mb-1.5 block">Preset Examples:</span>
-              <div class="flex flex-wrap gap-1.5">
-                <button
-                  v-for="(preset, idx) in presets"
-                  :key="idx"
-                  type="button"
-                  @click="promptInput = preset"
-                  class="rounded-md bg-zinc-800 hover:bg-zinc-700/80 px-2.5 py-1 text-[11px] text-zinc-300 border border-zinc-700/60 transition-colors text-left"
-                >
-                  {{ preset }}
-                </button>
-              </div>
             </div>
 
             <!-- Form -->
@@ -104,12 +64,6 @@
                 <span>{{ isSubmitting ? 'Dispatching Pipeline...' : 'Generate Shots & Watch Live' }}</span>
               </button>
             </form>
-
-            <!-- Active Style Anchor -->
-            <div v-if="styleAnchor" class="mt-4 rounded-lg bg-zinc-950/60 border border-zinc-800 p-2.5 text-xs">
-              <span class="text-[11px] font-medium uppercase tracking-wider text-indigo-400 block mb-0.5">Style Anchor:</span>
-              <p class="text-zinc-300 font-mono text-[11px]">{{ styleAnchor }}</p>
-            </div>
           </div>
 
           <!-- Live Stage Stream Component -->
@@ -162,12 +116,6 @@
               :video-progress="shotVideoProgress[shot.id] || 0"
             />
           </div>
-
-          <FinalAssembly
-            :brief-state="briefState"
-            :audio-path="audioPath"
-            :final-video-path="finalVideoPath"
-          />
         </section>
       </div>
     </main>
@@ -176,26 +124,19 @@
 
 <script setup>
 import { useLiveBrief } from '../composables/useLiveBrief';
-import FinalAssembly from './FinalAssembly.vue';
 import ShotCard from './ShotCard.vue';
 import StageStream from './StageStream.vue';
 
 const {
-  presets,
   promptInput,
   isSubmitting,
   errorMessage,
-  activeBriefId,
   briefState,
-  styleAnchor,
-  audioPath,
-  finalVideoPath,
   shots,
   shotVideoProgress,
   judgeFailureTag,
   isRegenerating,
   streamEvents,
-  connectionStatus,
   isJudging,
   overallVideoProgress,
   submitBrief,

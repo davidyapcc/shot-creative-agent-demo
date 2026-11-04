@@ -73,7 +73,11 @@ class PollVideoRenderJob implements ShouldQueue
     if ($result->isPending())
     {
       $progress = $result->progress ?? self::DEFAULT_PENDING_PROGRESS;
-      $this->storeVideoProgress($progress);
+      $pendingShot = Shot::find($this->shotId);
+      if ($pendingShot !== null)
+      {
+        $this->storeVideoProgress($pendingShot, $progress);
+      }
       VideoProgressUpdated::dispatch($this->briefId, $this->shotId, $progress);
 
       $this->release(self::POLL_DELAY_SECONDS);
@@ -95,11 +99,8 @@ class PollVideoRenderJob implements ShouldQueue
 
     Storage::disk('s3')->put($videoPath, (string) $result->videoContent);
 
-    $shot->update([
+    $this->storeVideoProgress($shot, self::COMPLETED_PROGRESS, [
       'video_path' => $videoPath,
-      'metadata' => array_merge($shot->metadata ?? [], [
-        'video_progress' => self::COMPLETED_PROGRESS,
-      ]),
     ]);
 
     $shot->transitionTo(ShotState::JudgingVideo);
@@ -119,16 +120,13 @@ class PollVideoRenderJob implements ShouldQueue
     }
   }
 
-  private function storeVideoProgress(int $progress): void
+  /**
+   * @param array<string, mixed> $attributes
+   */
+  private function storeVideoProgress(Shot $shot, int $progress, array $attributes = []): void
   {
-    $shot = Shot::find($this->shotId);
-
-    if ($shot === null)
-    {
-      return;
-    }
-
     $shot->update([
+      ...$attributes,
       'metadata' => array_merge($shot->metadata ?? [], [
         'video_progress' => $progress,
       ]),

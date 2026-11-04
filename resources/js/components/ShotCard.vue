@@ -223,10 +223,6 @@ const stateBadgeClass = computed(() =>
 
 function formatState(state)
 {
-  if (!state)
-  {
-    return ShotState.PENDING;
-  }
-  return state.replace(/_/g, ' ');
+  return (state || ShotState.PENDING).replace(/_/g, ' ');
 }
 </script>

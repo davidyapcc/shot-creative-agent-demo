@@ -1,43 +1,44 @@
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { initEcho } from '../echo';
-import { BriefState, ShotState, Verdict } from '../constants';
+import { computed, onMounted, ref } from 'vue';
+import { fetchBrief, postBrief } from '../briefApi';
+import { BroadcastEvent } from '../broadcastEvents';
+import { BriefState, ShotState } from '../constants';
+import { failTagFor, failTagFrom, latestJudgement } from '../shotJudgement';
+import { useBriefChannel } from './useBriefChannel';
+import { useStreamLog } from './useStreamLog';
 
 const MAX_PROMPT_PREVIEW_LENGTH = 35;
 const COMPLETED_VIDEO_PROGRESS = 100;
 
-const presets = [
-  '15s product teaser, rainy Tokyo, neon',
-  '10s cinematic drone shot, snow-capped alpine mountains at sunrise',
-  '12s cyberpunk street market, holographic ramen stall',
-];
+const STATES_THAT_REFRESH = new Set([
+  BriefState.AUDIO,
+  BriefState.MUXING,
+  BriefState.DONE,
+  BriefState.DEGRADED,
+]);
 
 export function useLiveBrief()
 {
-  const promptInput = ref(presets[0]);
+  const promptInput = ref('');
   const isSubmitting = ref(false);
   const errorMessage = ref(null);
 
-  const activeBriefId = ref(null);
   const briefState = ref(BriefState.PENDING);
-  const styleAnchor = ref(null);
-  const audioPath = ref(null);
-  const finalVideoPath = ref(null);
-
   const shots = ref([]);
   const shotVideoProgress = ref({});
   const judgeFailureTag = ref(null);
   // Issue #6 owns retries. Leave this false so a fail tag does not look like a retry.
   const isRegenerating = ref(false);
 
-  const streamEvents = ref([]);
-  const connectionStatus = ref('connecting');
-
-  let echo = null;
-  let activeChannel = null;
   let shotRevision = 0;
   let briefRevision = 0;
   let syncSerial = 0;
   const shotRevisions = new Map();
+
+  const { streamEvents, addStreamEvent, clearStream, seedStream } = useStreamLog();
+  const { subscribe } = useBriefChannel((error) =>
+  {
+    errorMessage.value = error.message;
+  });
 
   const isJudging = computed(() =>
   {
@@ -63,63 +64,17 @@ export function useLiveBrief()
 
   onMounted(() =>
   {
-    setupEcho();
-
     const params = new URLSearchParams(window.location.search);
     const briefId = params.get('brief_id');
-    if (briefId)
-    {
-      const id = Number(briefId);
-      subscribeToBrief(id);
-      syncBrief(id);
-    }
-  });
-
-  onBeforeUnmount(() =>
-  {
-    detachChannelListeners(activeChannel);
-    if (echo)
-    {
-      echo.disconnect();
-    }
-  });
-
-  function setupEcho()
-  {
-    try
-    {
-      echo = initEcho();
-      bindConnectionStatus(echo);
-    }
-    catch (error)
-    {
-      console.error('Failed to initialize Echo:', error);
-      connectionStatus.value = 'error';
-      errorMessage.value = error.message;
-    }
-  }
-
-  function bindConnectionStatus(client)
-  {
-    const connection = client.connector?.pusher?.connection;
-    if (!connection)
+    if (!briefId)
     {
       return;
     }
 
-    connection.bind('connected', () =>
-    {
-      connectionStatus.value = 'connected';
-    });
-    connection.bind('disconnected', () =>
-    {
-      connectionStatus.value = 'disconnected';
-    });
-    connection.bind('connecting', () =>
-    {
-      connectionStatus.value = 'connecting';
-    });
-  }
+    const id = Number(briefId);
+    subscribeToBrief(id);
+    syncBrief(id);
+  });
 
   async function submitBrief()
   {
@@ -137,7 +92,10 @@ export function useLiveBrief()
       resetActiveState(brief);
 
       const preview = brief.prompt.slice(0, MAX_PROMPT_PREVIEW_LENGTH);
-      addStreamEvent('BriefSubmitted', `Brief #${brief.id} enqueued: "${preview}..."`);
+      addStreamEvent(
+        'BriefSubmitted',
+        `Brief #${brief.id} enqueued: "${preview}..."`,
+      );
 
       subscribeToBrief(brief.id);
       await syncBrief(brief.id);
@@ -156,37 +114,14 @@ export function useLiveBrief()
     }
   }
 
-  async function postBrief(prompt)
-  {
-    const response = await fetch('/briefs', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify({ prompt }),
-    });
-
-    const json = await response.json();
-    if (!response.ok || !json.success)
-    {
-      throw new Error(json.error?.message || 'Failed to submit brief');
-    }
-
-    return json.data.brief;
-  }
-
   function resetActiveState(brief)
   {
-    activeBriefId.value = brief.id;
     briefState.value = brief.state;
     shots.value = [];
     shotVideoProgress.value = {};
     judgeFailureTag.value = null;
     isRegenerating.value = false;
-    audioPath.value = null;
-    finalVideoPath.value = null;
-    streamEvents.value = [];
+    clearStream();
   }
 
   async function syncBrief(id)
@@ -208,7 +143,11 @@ export function useLiveBrief()
 
       const appliedShots = applySyncedShots(brief.shots, knownShotIds, shotRevisionAtStart);
       refreshFailureTag(appliedShots);
-      seedStream({ ...brief, state: briefState.value }, appliedShots);
+      seedStream(
+        { ...brief, state: briefState.value },
+        appliedShots,
+        (shotId) => shotVideoProgress.value[shotId] ?? 0,
+      );
     }
     catch (error)
     {
@@ -222,51 +161,11 @@ export function useLiveBrief()
     }
   }
 
-  async function fetchBrief(id)
-  {
-    const response = await fetch(`/briefs/${id}`, {
-      headers: { 'Accept': 'application/json' },
-    });
-
-    if (!response.ok)
-    {
-      throw new Error(`Failed to load brief #${id}: ${response.statusText}`);
-    }
-
-    const json = await response.json();
-    if (!json.success || !json.data?.brief)
-    {
-      throw new Error(`Failed to load brief #${id}`);
-    }
-
-    return json.data.brief;
-  }
-
   function applyBriefRecord(brief, briefRevisionAtStart)
   {
-    activeBriefId.value = brief.id;
-
-    const snapshotIsCurrent = briefRevision === briefRevisionAtStart;
-    if (snapshotIsCurrent)
+    if (briefRevision === briefRevisionAtStart)
     {
       briefState.value = brief.state;
-      styleAnchor.value = brief.style_anchor ?? null;
-      audioPath.value = brief.audio_path ?? null;
-      finalVideoPath.value = brief.final_video_path ?? null;
-      return;
-    }
-
-    if (brief.style_anchor)
-    {
-      styleAnchor.value = brief.style_anchor;
-    }
-    if (brief.audio_path)
-    {
-      audioPath.value = brief.audio_path;
-    }
-    if (brief.final_video_path)
-    {
-      finalVideoPath.value = brief.final_video_path;
     }
   }
 
@@ -293,6 +192,14 @@ export function useLiveBrief()
     const applied = [...fromServer, ...arrivedDuringFetch]
       .sort((left, right) => left.sequence - right.sequence);
 
+    shotVideoProgress.value = progressForShots(applied);
+    shots.value = applied;
+
+    return applied;
+  }
+
+  function progressForShots(applied)
+  {
     const previousProgress = shotVideoProgress.value;
     const nextProgress = {};
 
@@ -305,10 +212,7 @@ export function useLiveBrief()
       }
     }
 
-    shots.value = applied;
-    shotVideoProgress.value = nextProgress;
-
-    return applied;
+    return nextProgress;
   }
 
   function progressForShot(shot)
@@ -340,9 +244,10 @@ export function useLiveBrief()
       }
 
       sawJudgement = true;
-      if (latest.verdict === Verdict.FAIL)
+      const tag = failTagFor(latest);
+      if (tag)
       {
-        nextTag = failTagFrom(latest.hard_fail_tags);
+        nextTag = tag;
         break;
       }
     }
@@ -353,92 +258,17 @@ export function useLiveBrief()
     }
   }
 
-  function seedStream(brief, appliedShots)
-  {
-    if (brief.state && brief.state !== BriefState.PENDING)
-    {
-      addRecoveredEvent(
-        'BriefStateChanged',
-        `Brief state is ${brief.state}`,
-        { state: brief.state },
-      );
-    }
-
-    for (const shot of appliedShots)
-    {
-      seedShot(shot);
-    }
-  }
-
-  function seedShot(shot)
-  {
-    addRecoveredEvent(
-      'ShotUpdated',
-      `Shot #${shot.sequence} state is ${shot.state}`,
-      { state: shot.state, shotId: shot.id },
-    );
-
-    const progress = shotVideoProgress.value[shot.id] ?? 0;
-    if (progress > 0)
-    {
-      addRecoveredEvent(
-        'VideoProgressUpdated',
-        `Shot #${shot.id} video progress ${progress}%`,
-        { shotId: shot.id, progress },
-      );
-    }
-
-    const latest = latestJudgement(shot);
-    if (latest?.verdict !== Verdict.FAIL)
-    {
-      return;
-    }
-
-    const tag = failTagFrom(latest.hard_fail_tags);
-    const detail = `${latest.stage} verdict: FAIL` + (tag ? ` (fail: ${tag})` : '');
-    addRecoveredEvent(
-      'JudgeVerdictRecorded',
-      detail,
-      { verdict: Verdict.FAIL, shotId: shot.id, stage: latest.stage },
-    );
-  }
-
-  function latestJudgement(shot)
-  {
-    if (shot.latest_judgement)
-    {
-      return shot.latest_judgement;
-    }
-
-    if (!Array.isArray(shot.judgements) || shot.judgements.length === 0)
-    {
-      return null;
-    }
-
-    return [...shot.judgements].sort((left, right) => left.id - right.id).at(-1);
-  }
-
-  function failTagFrom(tags)
-  {
-    return Array.isArray(tags) && tags.length > 0 ? tags[0] : null;
-  }
-
   function handleBriefStateChanged(data, briefId)
   {
     briefRevision += 1;
     briefState.value = data.to;
     addStreamEvent(
-      'BriefStateChanged',
+      BroadcastEvent.BRIEF_STATE_CHANGED,
       `Transitioned from ${data.from} to ${data.to}`,
       { state: data.to },
     );
 
-    if (
-      data.to === BriefState.AUDIO
-      || data.to === BriefState.MUXING
-      || data.to === BriefState.DONE
-      || data.to === BriefState.DEGRADED
-    )
+    if (STATES_THAT_REFRESH.has(data.to))
     {
       syncBrief(briefId);
     }
@@ -455,10 +285,18 @@ export function useLiveBrief()
     }
 
     addStreamEvent(
-      'VideoProgressUpdated',
-      `Shot #${data.shotId || ''} video progress ${data.progress}%`,
+      BroadcastEvent.VIDEO_PROGRESS_UPDATED,
+      progressDetail(data.shotId, data.progress),
       { shotId: data.shotId, progress: data.progress },
     );
+  }
+
+  function progressDetail(shotId, progress)
+  {
+    const shot = shots.value.find((item) => item.id === shotId);
+    const number = shot?.sequence ?? shotId;
+
+    return `Shot #${number} video progress ${progress}%`;
   }
 
   function handleShotUpdated(data)
@@ -484,7 +322,7 @@ export function useLiveBrief()
     }
 
     addStreamEvent(
-      'ShotUpdated',
+      BroadcastEvent.SHOT_UPDATED,
       `Shot #${updatedShot.sequence} state is ${updatedShot.state}`,
       { state: updatedShot.state, shotId: updatedShot.id },
     );
@@ -496,37 +334,30 @@ export function useLiveBrief()
     const verdictDetail = `${data.stage} verdict: ${data.verdict.toUpperCase()}` +
       (tag ? ` (fail: ${tag})` : '');
 
-    addStreamEvent('JudgeVerdictRecorded', verdictDetail, {
+    addStreamEvent(BroadcastEvent.JUDGE_VERDICT_RECORDED, verdictDetail, {
       verdict: data.verdict,
       shotId: data.shotId,
       stage: data.stage,
     });
 
-    if (data.verdict === Verdict.FAIL)
+    const failureTag = failTagFor({
+      verdict: data.verdict,
+      hard_fail_tags: data.hardFailTags,
+    });
+    if (failureTag)
     {
-      judgeFailureTag.value = tag || 'failed';
+      judgeFailureTag.value = failureTag;
     }
   }
 
   function subscribeToBrief(briefId)
   {
-    if (!echo)
-    {
-      setupEcho();
-    }
-
-    if (!echo)
-    {
-      return;
-    }
-
-    detachChannelListeners(activeChannel);
-
-    activeChannel = echo.channel(`briefs.${briefId}`);
-    activeChannel.listen('.BriefStateChanged', (data) => handleBriefStateChanged(data, briefId));
-    activeChannel.listen('.VideoProgressUpdated', handleVideoProgressUpdated);
-    activeChannel.listen('.ShotUpdated', handleShotUpdated);
-    activeChannel.listen('.JudgeVerdictRecorded', handleJudgeVerdictRecorded);
+    subscribe(briefId, {
+      [BroadcastEvent.BRIEF_STATE_CHANGED]: (data) => handleBriefStateChanged(data, briefId),
+      [BroadcastEvent.VIDEO_PROGRESS_UPDATED]: handleVideoProgressUpdated,
+      [BroadcastEvent.SHOT_UPDATED]: handleShotUpdated,
+      [BroadcastEvent.JUDGE_VERDICT_RECORDED]: handleJudgeVerdictRecorded,
+    });
   }
 
   function noteShotRevision(shotId)
@@ -535,59 +366,16 @@ export function useLiveBrief()
     shotRevisions.set(shotId, shotRevision);
   }
 
-  function detachChannelListeners(channel)
-  {
-    if (!channel)
-    {
-      return;
-    }
-
-    channel.stopListening('.BriefStateChanged');
-    channel.stopListening('.VideoProgressUpdated');
-    channel.stopListening('.ShotUpdated');
-    channel.stopListening('.JudgeVerdictRecorded');
-  }
-
-  function addStreamEvent(name, detail, extra = {})
-  {
-    const time = new Date().toLocaleTimeString();
-    streamEvents.value = [...streamEvents.value, { name, detail, time, ...extra }];
-  }
-
-  function addRecoveredEvent(name, detail, extra = {})
-  {
-    const event = { name, ...extra };
-    const duplicate = streamEvents.value.some((existing) =>
-      existing.name === event.name
-      && existing.state === event.state
-      && existing.shotId === event.shotId
-      && existing.progress === event.progress
-      && existing.verdict === event.verdict
-      && existing.stage === event.stage
-    );
-
-    if (!duplicate)
-    {
-      addStreamEvent(name, detail, extra);
-    }
-  }
-
   return {
-    presets,
     promptInput,
     isSubmitting,
     errorMessage,
-    activeBriefId,
     briefState,
-    styleAnchor,
-    audioPath,
-    finalVideoPath,
     shots,
     shotVideoProgress,
     judgeFailureTag,
     isRegenerating,
     streamEvents,
-    connectionStatus,
     isJudging,
     overallVideoProgress,
     submitBrief,

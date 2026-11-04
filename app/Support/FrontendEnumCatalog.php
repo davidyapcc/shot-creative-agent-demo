@@ -11,8 +11,8 @@ use App\Enums\ShotState;
 /**
  * PHP enums exported for the Vue page.
  *
- * resources/js/pipeline-states.json is generated from this catalog.
- * FrontendEnumCatalogTest fails when the file drifts.
+ * Write resources/js/pipeline-states.json with `php artisan frontend:export-states`.
+ * FrontendEnumCatalogTest fails when the file drifts from that output.
  */
 final class FrontendEnumCatalog
 {
@@ -26,6 +26,22 @@ final class FrontendEnumCatalog
       'shot' => self::map(ShotState::class),
       'verdict' => self::map(JudgementVerdict::class),
     ];
+  }
+
+  public static function toJson(): string
+  {
+    $encoded = json_encode(
+      self::toArray(),
+      JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+    );
+
+    $indented = preg_replace_callback(
+      '/^(?:    )+/m',
+      fn (array $match): string => str_repeat('  ', intdiv(strlen($match[0]), 4)),
+      $encoded,
+    );
+
+    return ($indented ?? $encoded) . "\n";
   }
 
   /**

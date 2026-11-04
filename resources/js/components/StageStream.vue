@@ -32,19 +32,19 @@
           <div
             :class="[
               'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 transition-all duration-200',
-              stage.status === 'completed'
+              stage.status === ChipStatus.COMPLETED
                 ? 'border-emerald-600/40 bg-emerald-950/40 text-emerald-300 shadow-sm'
-                : stage.status === 'active'
+                : stage.status === ChipStatus.ACTIVE
                   ? 'border-sky-500 bg-sky-950/60 text-sky-200 ring-2 ring-sky-500/30 animate-pulse'
-                  : stage.status === 'failed'
+                  : stage.status === ChipStatus.FAILED
                     ? 'border-rose-600/60 bg-rose-950/50 text-rose-300 font-semibold'
                     : 'border-zinc-800 bg-zinc-900 text-zinc-500 opacity-60'
             ]"
           >
             <!-- Status Icon -->
-            <span v-if="stage.status === 'completed'" class="text-emerald-400">✓</span>
-            <span v-else-if="stage.status === 'active'" class="h-2 w-2 rounded-full bg-sky-400 animate-ping"></span>
-            <span v-else-if="stage.status === 'failed'" class="text-rose-400">✕</span>
+            <span v-if="stage.status === ChipStatus.COMPLETED" class="text-emerald-400">✓</span>
+            <span v-else-if="stage.status === ChipStatus.ACTIVE" class="h-2 w-2 rounded-full bg-sky-400 animate-ping"></span>
+            <span v-else-if="stage.status === ChipStatus.FAILED" class="text-rose-400">✕</span>
             <span v-else class="text-zinc-600">•</span>
 
             <span>{{ stage.label }}</span>
@@ -55,7 +55,7 @@
             v-if="idx < stageSequence.length - 1"
             :class="[
               'text-sm transition-colors',
-              stage.status === 'completed' ? 'text-emerald-500' : 'text-zinc-700'
+              stage.status === ChipStatus.COMPLETED ? 'text-emerald-500' : 'text-zinc-700'
             ]"
           >
             →
@@ -86,9 +86,9 @@
             <span
               :class="[
                 'inline-block h-1.5 w-1.5 rounded-full',
-                ev.type === 'error' || ev.verdict === Verdict.FAIL
+                ev.verdict === Verdict.FAIL
                   ? 'bg-rose-500'
-                  : ev.name === 'VideoProgressUpdated'
+                  : ev.name === BroadcastEvent.VIDEO_PROGRESS_UPDATED
                     ? 'bg-amber-400'
                     : 'bg-emerald-400'
               ]"
@@ -105,7 +105,15 @@
 
 <script setup>
 import { computed } from 'vue';
+import { BroadcastEvent } from '../broadcastEvents';
 import { BriefState, StageRank, Verdict } from '../constants';
+
+const ChipStatus = Object.freeze({
+  COMPLETED: 'completed',
+  ACTIVE: 'active',
+  FAILED: 'failed',
+  PENDING: 'pending',
+});
 
 const STAGE_JUDGING = 'judging';
 const STAGE_VIDEO = 'video';
@@ -173,25 +181,25 @@ function resolveStageStatus(stageRank, currentRank, isFailed, isCurrentActive, i
 {
   if (isStageFailed)
   {
-    return 'failed';
+    return ChipStatus.FAILED;
   }
 
   if (isCurrentActive)
   {
-    return 'active';
+    return ChipStatus.ACTIVE;
   }
 
   if (currentRank > stageRank)
   {
-    return 'completed';
+    return ChipStatus.COMPLETED;
   }
 
   if (isFailed && currentRank === stageRank)
   {
-    return 'failed';
+    return ChipStatus.FAILED;
   }
 
-  return 'pending';
+  return ChipStatus.PENDING;
 }
 
 const stageSequence = computed(() =>

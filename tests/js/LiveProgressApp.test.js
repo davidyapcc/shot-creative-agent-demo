@@ -30,6 +30,12 @@ vi.mock('../../resources/js/echo', () => ({
   initEcho: vi.fn(() => mockEcho),
 }));
 
+async function submitPrompt(wrapper, prompt = '15s product teaser, rainy Tokyo, neon')
+{
+  await wrapper.find('textarea').setValue(prompt);
+  await wrapper.find('form').trigger('submit.prevent');
+}
+
 describe('LiveProgressApp', () =>
 {
   beforeEach(() =>
@@ -42,12 +48,15 @@ describe('LiveProgressApp', () =>
     }
   });
 
-  it('renders initial state with prompt preset and submit button', () =>
+  it('renders an empty brief form and a submit button', () =>
   {
     const wrapper = mount(LiveProgressApp);
     expect(wrapper.text()).toContain('Submit Creative Brief');
-    expect(wrapper.find('textarea').element.value).toContain('15s product teaser');
+    expect(wrapper.find('textarea').element.value).toBe('');
+    expect(wrapper.find('textarea').attributes('placeholder')).toContain('15s product teaser');
     expect(wrapper.find('button[type="submit"]').text()).toContain('Generate Shots & Watch Live');
+    expect(wrapper.text()).not.toContain('Preset Examples');
+    expect(wrapper.text()).not.toContain('Final Assembly');
   });
 
   it('submits brief via POST /briefs, subscribes to Echo, and syncs data', async () =>
@@ -80,7 +89,7 @@ describe('LiveProgressApp', () =>
 
     const wrapper = mount(LiveProgressApp);
 
-    await wrapper.find('form').trigger('submit.prevent');
+    await submitPrompt(wrapper);
     await flushPromises();
 
     expect(global.fetch).toHaveBeenCalledWith('/briefs', expect.objectContaining({ method: 'POST' }));
@@ -98,7 +107,7 @@ describe('LiveProgressApp', () =>
     });
 
     const wrapper = mount(LiveProgressApp);
-    await wrapper.find('form').trigger('submit.prevent');
+    await submitPrompt(wrapper);
     await flushPromises();
 
     // 1. BriefStateChanged
@@ -157,7 +166,7 @@ describe('LiveProgressApp', () =>
     });
 
     const wrapper = mount(LiveProgressApp);
-    await wrapper.find('form').trigger('submit.prevent');
+    await submitPrompt(wrapper);
     await flushPromises();
 
     expect(wrapper.text()).toContain('Validation failed');
@@ -173,7 +182,7 @@ describe('LiveProgressApp', () =>
       state: 'rendering',
       shots: [
         {
-          id: 1,
+          id: 9,
           sequence: 1,
           prompt: 'Finished shot',
           state: 'done',
@@ -182,7 +191,7 @@ describe('LiveProgressApp', () =>
           judgements: [],
         },
         {
-          id: 2,
+          id: 10,
           sequence: 2,
           prompt: 'Rendering shot',
           state: 'generating_video',
@@ -213,6 +222,7 @@ describe('LiveProgressApp', () =>
     expect(wrapper.text()).toContain('Shot #1 state is done');
     expect(wrapper.text()).toContain('Shot #1 video progress 100%');
     expect(wrapper.text()).toContain('Shot #2 video progress 50%');
+    expect(wrapper.text()).not.toContain('Shot #9 video progress');
     expect(wrapper.text()).toContain('Rendering video 50%');
     expect(wrapper.text()).toContain('video 75%');
     expect(wrapper.text()).toContain('judging (fail: anatomy)');
