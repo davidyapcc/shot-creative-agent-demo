@@ -5,7 +5,7 @@
         <span
           :class="[
             'inline-flex h-2.5 w-2.5 rounded-full',
-            briefState === 'failed' ? 'bg-rose-400' : 'bg-emerald-400 animate-pulse'
+            briefState === BriefState.FAILED ? 'bg-rose-400' : 'bg-emerald-400 animate-pulse'
           ]"
         ></span>
         <h3 class="text-sm font-semibold uppercase tracking-wider text-zinc-300">Live Stage Stream</h3>
@@ -13,9 +13,9 @@
       <span
         :class="[
           'rounded-full px-2.5 py-0.5 text-xs font-mono font-medium border',
-          briefState === 'failed'
+          briefState === BriefState.FAILED
             ? 'bg-rose-950/60 text-rose-300 border-rose-800/60'
-            : briefState === 'done'
+            : briefState === BriefState.DONE
               ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60'
               : 'bg-zinc-800 text-zinc-400 border-zinc-700/60'
         ]"
@@ -86,7 +86,7 @@
             <span
               :class="[
                 'inline-block h-1.5 w-1.5 rounded-full',
-                ev.type === 'error' || ev.verdict === 'fail'
+                ev.type === 'error' || ev.verdict === Verdict.FAIL
                   ? 'bg-rose-500'
                   : ev.name === 'VideoProgressUpdated'
                     ? 'bg-amber-400'
@@ -105,12 +105,27 @@
 
 <script setup>
 import { computed } from 'vue';
-import { StageRank } from '../constants';
+import { BriefState, StageRank, Verdict } from '../constants';
+
+const STAGE_JUDGING = 'judging';
+const STAGE_VIDEO = 'video';
+const STAGE_REGENERATING = 'regenerating';
+
+const BRIEF_STATE_RANK = Object.freeze({
+  [BriefState.PENDING]: StageRank.PENDING,
+  [BriefState.PLANNING]: StageRank.PLANNING,
+  [BriefState.KEYFRAMES]: StageRank.KEYFRAMES,
+  [BriefState.RENDERING]: StageRank.RENDERING,
+  [BriefState.AUDIO]: StageRank.AUDIO,
+  [BriefState.MUXING]: StageRank.MUXING,
+  [BriefState.DONE]: StageRank.DONE,
+  [BriefState.DEGRADED]: StageRank.DONE,
+});
 
 const props = defineProps({
   briefState: {
     type: String,
-    default: 'pending',
+    default: BriefState.PENDING,
   },
   videoProgress: {
     type: Number,
@@ -141,14 +156,14 @@ const reversedEvents = computed(() =>
 
 function computeStageLabel(stageId, failTag, progress)
 {
-  if (stageId === 'judging')
+  if (stageId === STAGE_JUDGING)
   {
-    return failTag ? `judging (fail: ${failTag})` : 'judging';
+    return failTag ? `judging (fail: ${failTag})` : STAGE_JUDGING;
   }
 
-  if (stageId === 'video')
+  if (stageId === STAGE_VIDEO)
   {
-    return progress > 0 ? `video ${progress}%` : 'video';
+    return progress > 0 ? `video ${progress}%` : STAGE_VIDEO;
   }
 
   return stageId;
@@ -181,69 +196,69 @@ function resolveStageStatus(stageRank, currentRank, isFailed, isCurrentActive, i
 
 const stageSequence = computed(() =>
 {
-  const state = (props.briefState || 'pending').toUpperCase();
-  const isFailed = props.briefState === 'failed';
+  const state = props.briefState || BriefState.PENDING;
+  const isFailed = state === BriefState.FAILED;
   const failTag = props.judgeFailureTag;
   const currentRank = isFailed
     ? (failTag ? StageRank.JUDGING : StageRank.KEYFRAMES)
-    : (StageRank[state] ?? StageRank.PENDING);
+    : (BRIEF_STATE_RANK[state] ?? StageRank.PENDING);
 
   const baseStages = [
     {
-      id: 'planning',
+      id: BriefState.PLANNING,
       rank: StageRank.PLANNING,
-      isCurrentActive: props.briefState === 'planning',
+      isCurrentActive: state === BriefState.PLANNING,
       isFailed: false,
     },
     {
-      id: 'keyframes',
+      id: BriefState.KEYFRAMES,
       rank: StageRank.KEYFRAMES,
-      isCurrentActive: props.briefState === 'keyframes' && !props.isJudging,
+      isCurrentActive: state === BriefState.KEYFRAMES && !props.isJudging,
       isFailed: isFailed && !failTag,
     },
     {
-      id: 'judging',
+      id: STAGE_JUDGING,
       rank: StageRank.JUDGING,
-      isCurrentActive: (props.briefState === 'keyframes' && props.isJudging)
-        || (props.briefState === 'rendering' && props.isJudging),
+      isCurrentActive: (state === BriefState.KEYFRAMES && props.isJudging)
+        || (state === BriefState.RENDERING && props.isJudging),
       isFailed: Boolean(failTag),
     },
   ];
 
-  if (props.isRegenerating || failTag)
+  if (props.isRegenerating)
   {
     baseStages.push({
-      id: 'regenerating',
+      id: STAGE_REGENERATING,
       rank: StageRank.JUDGING,
-      isCurrentActive: props.isRegenerating,
+      isCurrentActive: true,
       isFailed: false,
     });
   }
 
   baseStages.push(
     {
-      id: 'video',
+      id: STAGE_VIDEO,
       rank: StageRank.RENDERING,
-      isCurrentActive: props.briefState === 'rendering' && !props.isJudging,
+      isCurrentActive: state === BriefState.RENDERING && !props.isJudging,
       isFailed: false,
     },
     {
-      id: 'audio',
+      id: BriefState.AUDIO,
       rank: StageRank.AUDIO,
-      isCurrentActive: props.briefState === 'audio',
+      isCurrentActive: state === BriefState.AUDIO,
       isFailed: false,
     },
     {
-      id: 'muxing',
+      id: BriefState.MUXING,
       rank: StageRank.MUXING,
-      isCurrentActive: props.briefState === 'muxing',
+      isCurrentActive: state === BriefState.MUXING,
       isFailed: false,
     },
     {
-      id: 'done',
+      id: BriefState.DONE,
       rank: StageRank.DONE,
       isCurrentActive: false,
-      isFailed: false,
+      isFailed: state === BriefState.DEGRADED,
     },
   );
 

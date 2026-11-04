@@ -31,6 +31,31 @@ describe('StageStream', () => {
     });
 
     expect(wrapper.text()).toContain('judging (fail: anatomy)');
+    expect(wrapper.text()).not.toContain('regenerating');
+  });
+
+  it('shows regenerating only while a retry is in progress', () => {
+    const wrapper = mount(StageStream, {
+      props: {
+        briefState: 'keyframes',
+        judgeFailureTag: 'anatomy',
+        isRegenerating: true,
+      },
+    });
+
+    expect(wrapper.text()).toContain('regenerating');
+  });
+
+  it('ranks degraded from the state value', () => {
+    const wrapper = mount(StageStream, {
+      props: {
+        briefState: 'degraded',
+      },
+    });
+
+    expect(wrapper.text()).toContain('✓');
+    expect(wrapper.text()).toContain('✕');
+    expect(wrapper.text()).toContain('degraded');
   });
 
   it('renders video progress percentage when rendering', () => {

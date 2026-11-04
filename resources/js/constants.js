@@ -1,28 +1,9 @@
-export const BriefState = Object.freeze({
-  PENDING: 'pending',
-  PLANNING: 'planning',
-  KEYFRAMES: 'keyframes',
-  RENDERING: 'rendering',
-  AUDIO: 'audio',
-  MUXING: 'muxing',
-  DONE: 'done',
-  FAILED: 'failed',
-});
+import pipelineStates from './pipeline-states.json';
 
-export const ShotState = Object.freeze({
-  PENDING: 'pending',
-  GENERATING_IMAGE: 'generating_image',
-  JUDGING_IMAGE: 'judging_image',
-  GENERATING_VIDEO: 'generating_video',
-  JUDGING_VIDEO: 'judging_video',
-  COMPLETED: 'completed',
-  FAILED: 'failed',
-});
-
-export const Verdict = Object.freeze({
-  PASS: 'pass',
-  FAIL: 'fail',
-});
+// Values are generated from the PHP enums. See FrontendEnumCatalog.
+export const BriefState = Object.freeze(pipelineStates.brief);
+export const ShotState = Object.freeze(pipelineStates.shot);
+export const Verdict = Object.freeze(pipelineStates.verdict);
 
 export const StageRank = Object.freeze({
   PENDING: 0,

@@ -124,7 +124,6 @@ class BroadcastEventsTest extends TestCase
       shotId: 101,
       stage: JudgementStage::Video,
       verdict: JudgementVerdict::Fail,
-      tag: 'anatomy',
       hardFailTags: ['anatomy'],
       reason: 'Hand distorted',
     );
@@ -141,7 +140,7 @@ class BroadcastEventsTest extends TestCase
     $this->assertSame(101, $payload['shotId']);
     $this->assertSame('video', $payload['stage']);
     $this->assertSame('fail', $payload['verdict']);
-    $this->assertSame('anatomy', $payload['tag']);
+    $this->assertArrayNotHasKey('tag', $payload);
     $this->assertSame(['anatomy'], $payload['hardFailTags']);
     $this->assertSame('Hand distorted', $payload['reason']);
   }

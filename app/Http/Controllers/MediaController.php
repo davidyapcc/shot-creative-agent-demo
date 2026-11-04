@@ -7,6 +7,12 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
 
+/**
+ * Streams pipeline artifacts.
+ *
+ * The demo has no logins, so this route is public on purpose.
+ * Paths are limited to known prefixes and extensions, and the route is rate limited.
+ */
 class MediaController extends Controller
 {
   private const ALLOWED_PREFIXES = ['keyframes/', 'videos/', 'audio/', 'final/'];

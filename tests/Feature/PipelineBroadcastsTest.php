@@ -122,7 +122,6 @@ class PipelineBroadcastsTest extends TestCase
           && $event->shotId === $shot->id
           && $stage === 'image'
           && $verdict === 'fail'
-          && $event->tag === 'anatomy'
           && $event->hardFailTags === ['anatomy'];
       }
     );
@@ -161,6 +160,13 @@ class PipelineBroadcastsTest extends TestCase
           && $event->progress === 45;
       }
     );
+
+    $shot->refresh();
+    $this->assertSame(45, $shot->metadata['video_progress']);
+
+    $this->getJson("/briefs/{$brief->id}")
+      ->assertOk()
+      ->assertJsonPath('data.brief.shots.0.metadata.video_progress', 45);
   }
 
   public function test_judge_video_dispatches_judge_verdict_recorded_with_failure_tag(): void
@@ -203,7 +209,7 @@ class PipelineBroadcastsTest extends TestCase
           && $event->shotId === $shot->id
           && $stage === 'video'
           && $verdict === 'fail'
-          && $event->tag === 'temporal_flicker';
+          && $event->hardFailTags === ['temporal_flicker'];
       }
     );
     Event::assertDispatched(ShotUpdated::class);

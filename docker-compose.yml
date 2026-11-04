@@ -34,8 +34,12 @@ services:
       AWS_BUCKET: ${AWS_BUCKET:-shot-creative}
       AWS_ENDPOINT: http://minio:9000
       AWS_USE_PATH_STYLE_ENDPOINT: "true"
+      # Rebuild on boot so a stale public/build manifest is not reused.
+      FORCE_FRONTEND_BUILD: "true"
     volumes:
       - .:/var/www/html
+      # Container-local modules. npm install must not write Linux binaries over the host folder.
+      - frontend_node_modules:/var/www/html/node_modules
     depends_on:
       postgres:
         condition: service_healthy
@@ -165,3 +169,4 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
+  frontend_node_modules:

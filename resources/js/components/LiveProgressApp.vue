@@ -163,42 +163,11 @@
             />
           </div>
 
-          <!-- Final Assembly Output Card (when audio or final video ready) -->
-          <div
-            v-if="finalVideoPath || audioPath"
-            class="rounded-xl border border-emerald-800/40 bg-zinc-900/80 p-5 shadow-lg backdrop-blur-sm"
-          >
-            <div class="mb-3 flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <span class="flex h-2.5 w-2.5 rounded-full bg-emerald-400"></span>
-                <h3 class="text-sm font-semibold uppercase tracking-wider text-emerald-300">Final Assembly Output</h3>
-              </div>
-              <span class="rounded-full bg-emerald-950/60 border border-emerald-700/60 px-2.5 py-0.5 text-xs font-mono text-emerald-300">
-                {{ briefState === 'done' ? 'Pipeline Complete' : 'Assembling' }}
-              </span>
-            </div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <!-- Final Muxed MP4 -->
-              <div v-if="finalVideoPath" class="flex flex-col">
-                <span class="mb-1 text-[11px] font-medium uppercase tracking-wider text-zinc-400">Final Muxed Video (MP4)</span>
-                <video
-                  :src="`/media/${finalVideoPath}`"
-                  controls
-                  playsinline
-                  class="aspect-video w-full rounded-lg border border-zinc-800 bg-zinc-950 object-cover"
-                ></video>
-              </div>
-
-              <!-- Audio Voiceover & SFX -->
-              <div v-if="audioPath" class="flex flex-col justify-center">
-                <span class="mb-1 text-[11px] font-medium uppercase tracking-wider text-zinc-400">Audio (Voiceover + SFX)</span>
-                <div class="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
-                  <audio :src="`/media/${audioPath}`" controls class="w-full"></audio>
-                </div>
-              </div>
-            </div>
-          </div>
+          <FinalAssembly
+            :brief-state="briefState"
+            :audio-path="audioPath"
+            :final-video-path="finalVideoPath"
+          />
         </section>
       </div>
     </main>
@@ -206,312 +175,29 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
-import { initEcho } from '../echo';
-import { BriefState, ShotState, Verdict } from '../constants';
-import StageStream from './StageStream.vue';
+import { useLiveBrief } from '../composables/useLiveBrief';
+import FinalAssembly from './FinalAssembly.vue';
 import ShotCard from './ShotCard.vue';
+import StageStream from './StageStream.vue';
 
-const MAX_PROMPT_PREVIEW_LENGTH = 35;
-
-const presets = [
-  '15s product teaser, rainy Tokyo, neon',
-  '10s cinematic drone shot, snow-capped alpine mountains at sunrise',
-  '12s cyberpunk street market, holographic ramen stall',
-];
-
-const promptInput = ref(presets[0]);
-const isSubmitting = ref(false);
-const errorMessage = ref(null);
-
-const activeBriefId = ref(null);
-const briefState = ref(BriefState.PENDING);
-const styleAnchor = ref(null);
-const audioPath = ref(null);
-const finalVideoPath = ref(null);
-
-const shots = ref([]);
-const shotVideoProgress = ref({});
-const judgeFailureTag = ref(null);
-const isRegenerating = ref(false);
-
-const streamEvents = ref([]);
-const connectionStatus = ref('connecting');
-
-let echo = null;
-let activeChannel = null;
-
-const isJudging = computed(() =>
-{
-  return shots.value.some((s) => s.state === ShotState.JUDGING_IMAGE || s.state === ShotState.JUDGING_VIDEO);
-});
-
-const overallVideoProgress = computed(() =>
-{
-  if (shots.value.length === 0)
-  {
-    return 0;
-  }
-  const total = shots.value.reduce((acc, shot) => acc + (shotVideoProgress.value[shot.id] || 0), 0);
-  return Math.round(total / shots.value.length);
-});
-
-onMounted(() =>
-{
-  setupEcho();
-
-  const params = new URLSearchParams(window.location.search);
-  const briefId = params.get('brief_id');
-  if (briefId)
-  {
-    const id = Number(briefId);
-    subscribeToBrief(id);
-    syncBrief(id);
-  }
-});
-
-onBeforeUnmount(() =>
-{
-  detachChannelListeners(activeChannel);
-  if (echo)
-  {
-    echo.disconnect();
-  }
-});
-
-function detachChannelListeners(channel)
-{
-  if (!channel)
-  {
-    return;
-  }
-  channel.stopListening('.BriefStateChanged');
-  channel.stopListening('.VideoProgressUpdated');
-  channel.stopListening('.ShotUpdated');
-  channel.stopListening('.JudgeVerdictRecorded');
-}
-
-function setupEcho()
-{
-  try
-  {
-    echo = initEcho();
-
-    if (echo.connector && echo.connector.pusher)
-    {
-      echo.connector.pusher.connection.bind('connected', () =>
-      {
-        connectionStatus.value = 'connected';
-      });
-      echo.connector.pusher.connection.bind('disconnected', () =>
-      {
-        connectionStatus.value = 'disconnected';
-      });
-      echo.connector.pusher.connection.bind('connecting', () =>
-      {
-        connectionStatus.value = 'connecting';
-      });
-    }
-  }
-  catch (err)
-  {
-    console.error('Failed to initialize Echo:', err);
-    connectionStatus.value = 'error';
-  }
-}
-
-async function submitBrief()
-{
-  if (!promptInput.value.trim())
-  {
-    return;
-  }
-
-  isSubmitting.value = true;
-  errorMessage.value = null;
-
-  try
-  {
-    const response = await fetch('/briefs', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify({ prompt: promptInput.value }),
-    });
-
-    const json = await response.json();
-
-    if (!response.ok || !json.success)
-    {
-      errorMessage.value = json.error?.message || 'Failed to submit brief';
-      return;
-    }
-
-    const brief = json.data.brief;
-    resetActiveState(brief);
-
-    const preview = brief.prompt.slice(0, MAX_PROMPT_PREVIEW_LENGTH);
-    addStreamEvent('BriefSubmitted', `Brief #${brief.id} enqueued: "${preview}..."`);
-
-    subscribeToBrief(brief.id);
-    await syncBrief(brief.id);
-
-    const newUrl = `${window.location.pathname}?brief_id=${brief.id}`;
-    window.history.pushState({ path: newUrl }, '', newUrl);
-  }
-  catch (err)
-  {
-    errorMessage.value = err.message || 'Network error submitting brief';
-  }
-  finally
-  {
-    isSubmitting.value = false;
-  }
-}
-
-function resetActiveState(brief)
-{
-  activeBriefId.value = brief.id;
-  briefState.value = brief.state;
-  shots.value = [];
-  shotVideoProgress.value = {};
-  judgeFailureTag.value = null;
-  isRegenerating.value = false;
-  audioPath.value = null;
-  finalVideoPath.value = null;
-  streamEvents.value = [];
-}
-
-async function syncBrief(id)
-{
-  try
-  {
-    const response = await fetch(`/briefs/${id}`, {
-      headers: { 'Accept': 'application/json' },
-    });
-
-    if (!response.ok)
-    {
-      errorMessage.value = `Failed to load brief #${id}: ${response.statusText}`;
-      return;
-    }
-
-    const json = await response.json();
-    if (json.success && json.data?.brief)
-    {
-      const brief = json.data.brief;
-      activeBriefId.value = brief.id;
-      briefState.value = brief.state;
-      styleAnchor.value = brief.style_anchor;
-      audioPath.value = brief.audio_path;
-      finalVideoPath.value = brief.final_video_path;
-
-      if (Array.isArray(brief.shots) && brief.shots.length > 0)
-      {
-        shots.value = brief.shots;
-      }
-
-      inspectFailedJudgements(shots.value);
-    }
-  }
-  catch (e)
-  {
-    errorMessage.value = `Error loading brief #${id}: ${e.message}`;
-  }
-}
-
-function inspectFailedJudgements(loadedShots)
-{
-  for (const shot of loadedShots)
-  {
-    if (shot.judgements && shot.judgements.length > 0)
-    {
-      const latest = shot.judgements[shot.judgements.length - 1];
-      if (latest.verdict === Verdict.FAIL)
-      {
-        judgeFailureTag.value = latest.hard_fail_tags?.[0] || 'failed';
-        break;
-      }
-    }
-  }
-}
-
-function handleBriefStateChanged(data, briefId)
-{
-  briefState.value = data.to;
-  addStreamEvent('BriefStateChanged', `Transitioned from ${data.from} to ${data.to}`);
-
-  if (data.to === BriefState.AUDIO || data.to === BriefState.MUXING || data.to === BriefState.DONE)
-  {
-    syncBrief(briefId);
-  }
-}
-
-function handleVideoProgressUpdated(data)
-{
-  if (data.shotId)
-  {
-    shotVideoProgress.value = { ...shotVideoProgress.value, [data.shotId]: data.progress };
-  }
-  addStreamEvent('VideoProgressUpdated', `Shot #${data.shotId || ''} video progress ${data.progress}%`);
-}
-
-function handleShotUpdated(data)
-{
-  const updatedShot = data.shot;
-  if (!updatedShot)
-  {
-    return;
-  }
-
-  const existingIndex = shots.value.findIndex((s) => s.id === updatedShot.id);
-  if (existingIndex >= 0)
-  {
-    shots.value = shots.value.map((s, idx) => idx === existingIndex ? { ...s, ...updatedShot } : s);
-  }
-  else
-  {
-    shots.value = [...shots.value, updatedShot].sort((a, b) => a.sequence - b.sequence);
-  }
-
-  addStreamEvent('ShotUpdated', `Shot #${updatedShot.sequence} state is ${updatedShot.state}`);
-}
-
-function handleJudgeVerdictRecorded(data)
-{
-  const verdictDetail = `${data.stage} verdict: ${data.verdict.toUpperCase()}` +
-    (data.tag ? ` (fail: ${data.tag})` : '');
-  addStreamEvent('JudgeVerdictRecorded', verdictDetail, data.verdict);
-
-  if (data.verdict === Verdict.FAIL)
-  {
-    judgeFailureTag.value = data.tag || (data.hardFailTags ? data.hardFailTags[0] : 'failed');
-  }
-}
-
-function subscribeToBrief(briefId)
-{
-  if (!echo)
-  {
-    setupEcho();
-  }
-
-  detachChannelListeners(activeChannel);
-
-  const channelName = `briefs.${briefId}`;
-  activeChannel = echo.channel(channelName);
-
-  activeChannel.listen('.BriefStateChanged', (data) => handleBriefStateChanged(data, briefId));
-  activeChannel.listen('.VideoProgressUpdated', handleVideoProgressUpdated);
-  activeChannel.listen('.ShotUpdated', handleShotUpdated);
-  activeChannel.listen('.JudgeVerdictRecorded', handleJudgeVerdictRecorded);
-}
-
-function addStreamEvent(name, detail, verdict = null)
-{
-  const time = new Date().toLocaleTimeString();
-  streamEvents.value = [...streamEvents.value, { name, detail, time, verdict }];
-}
+const {
+  presets,
+  promptInput,
+  isSubmitting,
+  errorMessage,
+  activeBriefId,
+  briefState,
+  styleAnchor,
+  audioPath,
+  finalVideoPath,
+  shots,
+  shotVideoProgress,
+  judgeFailureTag,
+  isRegenerating,
+  streamEvents,
+  connectionStatus,
+  isJudging,
+  overallVideoProgress,
+  submitBrief,
+} = useLiveBrief();
 </script>

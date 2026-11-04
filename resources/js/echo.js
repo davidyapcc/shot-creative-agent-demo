@@ -14,9 +14,10 @@ export function initEcho(overrideConfig = {})
   const scheme = overrideConfig.reverbScheme || config.reverbScheme || DEFAULT_REVERB_SCHEME;
   const key = overrideConfig.reverbAppKey || config.reverbAppKey || '';
 
-  if (!key && typeof console !== 'undefined')
+  // Throw so a missing key fails at startup instead of opening a dead socket.
+  if (!key)
   {
-    console.warn('Reverb app key is not configured.');
+    throw new Error('Reverb app key is not configured.');
   }
 
   return new Echo({

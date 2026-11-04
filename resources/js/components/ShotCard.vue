@@ -59,7 +59,7 @@
       <div class="flex flex-col">
         <div class="mb-1 flex items-center justify-between">
           <span class="text-[11px] font-medium uppercase tracking-wider text-zinc-400">Video Clip</span>
-          <span v-if="shot.state === 'generating_video' && videoProgress > 0" class="text-[11px] font-mono text-amber-400">
+          <span v-if="shot.state === ShotState.GENERATING_VIDEO && videoProgress > 0" class="text-[11px] font-mono text-amber-400">
             {{ videoProgress }}%
           </span>
         </div>
@@ -100,7 +100,7 @@
       v-if="latestJudgement"
       :class="[
         'rounded-lg border p-3 text-xs',
-        latestJudgement.verdict === 'pass'
+        latestJudgement.verdict === Verdict.PASS
           ? 'border-emerald-800/40 bg-emerald-950/20 text-emerald-200'
           : 'border-rose-800/50 bg-rose-950/30 text-rose-200'
       ]"
@@ -206,8 +206,7 @@ const stateBadgeClass = computed(() =>
 {
   switch (props.shot.state)
   {
-    case ShotState.COMPLETED:
-    case 'done':
+    case ShotState.DONE:
       return 'border-emerald-600/40 bg-emerald-950/40 text-emerald-300';
     case ShotState.FAILED:
       return 'border-rose-600/40 bg-rose-950/40 text-rose-300';
@@ -226,7 +225,7 @@ function formatState(state)
 {
   if (!state)
   {
-    return 'pending';
+    return ShotState.PENDING;
   }
   return state.replace(/_/g, ' ');
 }

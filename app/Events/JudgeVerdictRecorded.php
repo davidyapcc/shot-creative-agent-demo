@@ -23,7 +23,6 @@ class JudgeVerdictRecorded implements ShouldBroadcastNow
     public readonly int $shotId,
     public readonly JudgementStage $stage,
     public readonly JudgementVerdict $verdict,
-    public readonly ?string $tag = null,
     public readonly array $hardFailTags = [],
     public readonly ?string $reason = null,
   )
@@ -37,14 +36,11 @@ class JudgeVerdictRecorded implements ShouldBroadcastNow
     JudgementResult $verdict,
   ): self
   {
-    $tag = $verdict->hardFailTags[0] ?? null;
-
     return new self(
       briefId: $briefId,
       shotId: $shotId,
       stage: $stage,
       verdict: $verdict->verdict,
-      tag: $tag,
       hardFailTags: $verdict->hardFailTags,
       reason: $verdict->reason,
     );
@@ -75,7 +71,6 @@ class JudgeVerdictRecorded implements ShouldBroadcastNow
       'shotId' => $this->shotId,
       'stage' => $this->stage->value,
       'verdict' => $this->verdict->value,
-      'tag' => $this->tag,
       'hardFailTags' => $this->hardFailTags,
       'reason' => $this->reason,
     ];

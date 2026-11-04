@@ -1,0 +1,26 @@
+{
+  "brief": {
+    "PENDING": "pending",
+    "PLANNING": "planning",
+    "KEYFRAMES": "keyframes",
+    "RENDERING": "rendering",
+    "AUDIO": "audio",
+    "MUXING": "muxing",
+    "DONE": "done",
+    "DEGRADED": "degraded",
+    "FAILED": "failed"
+  },
+  "shot": {
+    "PENDING": "pending",
+    "GENERATING_IMAGE": "generating_image",
+    "JUDGING_IMAGE": "judging_image",
+    "GENERATING_VIDEO": "generating_video",
+    "JUDGING_VIDEO": "judging_video",
+    "DONE": "done",
+    "FAILED": "failed"
+  },
+  "verdict": {
+    "PASS": "pass",
+    "FAIL": "fail"
+  }
+}
