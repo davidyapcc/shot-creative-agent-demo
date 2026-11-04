@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Exceptions\BudgetExceededException;
 use App\Models\Brief;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class Budget
 {
@@ -80,13 +81,21 @@ class Budget
       $ledger = $metadata['budget_ledger'] ?? [];
       $last = $ledger === [] ? null : $ledger[array_key_last($ledger)];
 
-      if ($locked->budget_used < 1 || !is_array($last))
-      {
-        return;
-      }
+      $isRefundable = $locked->budget_used >= 1
+        && is_array($last)
+        && $last['provider'] === $provider
+        && $last['operation'] === $operation;
 
-      if ($last['provider'] !== $provider || $last['operation'] !== $operation)
+      if (!$isRefundable)
       {
+        // Only the latest entry is refundable; another charge landed first.
+        Log::warning('Budget refund skipped: the latest ledger entry is not this call.', [
+          'brief_id' => $brief->id,
+          'provider' => $provider,
+          'operation' => $operation,
+          'latest_entry' => $last,
+        ]);
+
         return;
       }
 

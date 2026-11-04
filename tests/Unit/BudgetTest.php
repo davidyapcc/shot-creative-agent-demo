@@ -16,6 +16,7 @@ use App\Models\Shot;
 use App\Services\Budget;
 use App\Services\Providers\ReplayVideoProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -54,6 +55,32 @@ class BudgetTest extends TestCase
       $this->assertSame(2, $brief->budget_used);
       $this->assertCount(2, $brief->metadata['budget_ledger']);
     }
+  }
+
+  public function test_refund_logs_a_warning_when_another_charge_landed_in_between(): void
+  {
+    // Arrange
+    Log::spy();
+
+    $brief = Brief::create([
+      'prompt' => '15s product teaser, rainy Tokyo, neon',
+      'state' => BriefState::Audio,
+    ]);
+
+    $budget = app(Budget::class);
+    $budget->charge($brief, 'audio', 'generateVoiceover');
+    $budget->charge($brief, 'video', 'poll');
+
+    // Act
+    $budget->refund($brief, 'audio', 'generateVoiceover');
+
+    // Assert
+    $this->assertSame(2, $brief->refresh()->budget_used);
+    Log::shouldHaveReceived('warning')
+      ->once()
+      ->withArgs(fn (string $message, array $context): bool => str_contains($message, 'refund')
+        && $context['brief_id'] === $brief->id
+        && $context['operation'] === 'generateVoiceover');
   }
 
   public function test_cap_during_planning_stops_the_next_agent_call_and_marks_the_brief_degraded(): void
