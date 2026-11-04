@@ -11,6 +11,8 @@ use Illuminate\Support\Facades\Log;
 
 class Budget
 {
+  public const UNIT_COST = 1;
+
   public function __construct(
     private readonly DegradedCompletion $completion,
   )
@@ -25,7 +27,7 @@ class Budget
     DB::transaction(function () use ($brief, $provider, $operation): void
     {
       $locked = Brief::query()->whereKey($brief->id)->lockForUpdate()->firstOrFail();
-      $cap = (int) config('creative.budget_cap', 100);
+      $cap = (int) config('creative.budget_cap');
 
       if ($locked->budget_used >= $cap)
       {
@@ -37,12 +39,12 @@ class Budget
       $ledger[] = [
         'provider' => $provider,
         'operation' => $operation,
-        'cost' => 1,
+        'cost' => self::UNIT_COST,
       ];
       $metadata['budget_ledger'] = $ledger;
 
       $locked->update([
-        'budget_used' => $locked->budget_used + 1,
+        'budget_used' => $locked->budget_used + self::UNIT_COST,
         'metadata' => $metadata,
       ]);
     });
@@ -81,7 +83,7 @@ class Budget
       $ledger = $metadata['budget_ledger'] ?? [];
       $last = $ledger === [] ? null : $ledger[array_key_last($ledger)];
 
-      $isRefundable = $locked->budget_used >= 1
+      $isRefundable = $locked->budget_used >= self::UNIT_COST
         && is_array($last)
         && $last['provider'] === $provider
         && $last['operation'] === $operation;
@@ -103,7 +105,7 @@ class Budget
       $metadata['budget_ledger'] = $ledger;
 
       $locked->update([
-        'budget_used' => $locked->budget_used - 1,
+        'budget_used' => $locked->budget_used - self::UNIT_COST,
         'metadata' => $metadata,
       ]);
     });
