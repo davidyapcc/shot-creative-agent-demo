@@ -9,11 +9,35 @@ use Illuminate\Support\Facades\Storage;
 
 class MediaController extends Controller
 {
+  private const ALLOWED_PREFIXES = ['keyframes/', 'videos/', 'audio/'];
+  private const ALLOWED_EXTENSIONS = ['png', 'jpg', 'jpeg', 'mp4', 'mp3', 'wav'];
+
   public function show(string $path): Response
   {
     // Sanitize path against directory traversal
     $normalized = str_replace('\\', '/', $path);
     if (str_contains($normalized, '..') || str_starts_with($normalized, '/'))
+    {
+      abort(404);
+    }
+
+    $extension = strtolower(pathinfo($normalized, PATHINFO_EXTENSION));
+    if (!in_array($extension, self::ALLOWED_EXTENSIONS, true))
+    {
+      abort(404);
+    }
+
+    $isAllowedPrefix = false;
+    foreach (self::ALLOWED_PREFIXES as $prefix)
+    {
+      if (str_starts_with($normalized, $prefix))
+      {
+        $isAllowedPrefix = true;
+        break;
+      }
+    }
+
+    if (!$isAllowedPrefix)
     {
       abort(404);
     }
@@ -25,7 +49,7 @@ class MediaController extends Controller
       abort(404);
     }
 
-    $mimeType = $disk->mimeType($normalized) ?: match (pathinfo($normalized, PATHINFO_EXTENSION))
+    $mimeType = $disk->mimeType($normalized) ?: match ($extension)
     {
       'png' => 'image/png',
       'jpg', 'jpeg' => 'image/jpeg',
@@ -39,7 +63,7 @@ class MediaController extends Controller
 
     return response($content, 200, [
       'Content-Type' => $mimeType,
-      'Cache-Control' => 'public, max-age=3600',
+      'Cache-Control' => 'private, max-age=3600, no-transform',
     ]);
   }
 }

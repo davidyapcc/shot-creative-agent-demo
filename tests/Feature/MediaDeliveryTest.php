@@ -62,4 +62,24 @@ class MediaDeliveryTest extends TestCase
 
     $response->assertStatus(404);
   }
+
+  public function test_media_route_rejects_disallowed_prefixes(): void
+  {
+    Storage::fake('s3');
+    Storage::disk('s3')->put('secrets/key.png', 'secret-key');
+
+    $response = $this->get('/media/secrets/key.png');
+
+    $response->assertStatus(404);
+  }
+
+  public function test_media_route_rejects_disallowed_extensions(): void
+  {
+    Storage::fake('s3');
+    Storage::disk('s3')->put('keyframes/script.sh', '#!/bin/sh');
+
+    $response = $this->get('/media/keyframes/script.sh');
+
+    $response->assertStatus(404);
+  }
 }

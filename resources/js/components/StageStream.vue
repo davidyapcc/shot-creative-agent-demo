@@ -119,6 +119,10 @@ const props = defineProps({
     type: String,
     default: null,
   },
+  isJudging: {
+    type: Boolean,
+    default: false,
+  },
   isRegenerating: {
     type: Boolean,
     default: false,
@@ -129,118 +133,92 @@ const props = defineProps({
   },
 });
 
+const STAGE_RANKS = {
+  pending: 0,
+  planning: 1,
+  keyframes: 2,
+  judging: 3,
+  rendering: 4,
+  audio: 5,
+  muxing: 6,
+  done: 7,
+};
+
 const reversedEvents = computed(() => [...props.events].reverse());
+
+function computeStageLabel(stageId, failTag, progress)
+{
+  if (stageId === 'judging')
+  {
+    return failTag ? `judging (fail: ${failTag})` : 'judging';
+  }
+
+  if (stageId === 'video')
+  {
+    return progress > 0 ? `video ${progress}%` : 'video';
+  }
+
+  return stageId;
+}
+
+function resolveStageStatus(stageRank, currentRank, isFailed, isCurrentActive, isStageFailed)
+{
+  if (isStageFailed)
+  {
+    return 'failed';
+  }
+
+  if (isCurrentActive)
+  {
+    return 'active';
+  }
+
+  if (currentRank > stageRank)
+  {
+    return 'completed';
+  }
+
+  if (isFailed && currentRank === stageRank)
+  {
+    return 'failed';
+  }
+
+  return 'pending';
+}
 
 const stageSequence = computed(() => {
   const state = props.briefState || 'pending';
-  const progress = props.videoProgress;
-  const failTag = props.judgeFailureTag;
-  const regenerating = props.isRegenerating;
-
-  // Track highest stage achieved by scanning events
-  const eventNames = props.events.map((e) => e.name);
-  const eventDetails = props.events.map((e) => e.detail || '');
-
-  const hasPlanned = state !== 'pending' && state !== 'planning';
-  const hasKeyframes = hasPlanned && (
-    eventNames.includes('VideoProgressUpdated') ||
-    eventDetails.some((d) => d.includes('to rendering') || d.includes('to audio') || d.includes('to muxing') || d.includes('to done')) ||
-    ['rendering', 'audio', 'muxing', 'done'].includes(state)
-  );
-
   const isFailed = state === 'failed';
+  const failTag = props.judgeFailureTag;
+  const currentRank = isFailed ? (failTag ? STAGE_RANKS.judging : STAGE_RANKS.keyframes) : (STAGE_RANKS[state] || 0);
 
-  // Label for judging step: if failed, show `judging (fail: ${tag})`, else `judging`
-  const judgingLabel = failTag ? `judging (fail: ${failTag})` : 'judging';
-
-  // Label for video step: e.g. `video 40%` or `video`
-  const videoLabel = progress > 0
-    ? `video ${progress}%`
-    : state === 'rendering'
-      ? 'video in-progress'
-      : 'video';
-
-  const stages = [
-    {
-      id: 'planning',
-      label: 'planning',
-      status: state === 'planning'
-        ? 'active'
-        : hasPlanned || ['keyframes', 'rendering', 'audio', 'muxing', 'done'].includes(state) || isFailed
-          ? 'completed'
-          : 'pending',
-    },
-    {
-      id: 'keyframes',
-      label: 'keyframes',
-      status: state === 'keyframes' && !failTag
-        ? 'active'
-        : hasKeyframes || ['rendering', 'audio', 'muxing', 'done'].includes(state)
-          ? 'completed'
-          : isFailed && !failTag
-            ? 'failed'
-            : 'pending',
-    },
-    {
-      id: 'judging',
-      label: judgingLabel,
-      status: failTag
-        ? 'failed'
-        : hasKeyframes || ['rendering', 'audio', 'muxing', 'done'].includes(state)
-          ? 'completed'
-          : state === 'keyframes'
-            ? 'pending'
-            : 'pending',
-    },
+  const baseStages = [
+    { id: 'planning', rank: 1, isCurrentActive: state === 'planning', isFailed: false },
+    { id: 'keyframes', rank: 2, isCurrentActive: state === 'keyframes' && !props.isJudging, isFailed: isFailed && !failTag },
+    { id: 'judging', rank: 3, isCurrentActive: (state === 'keyframes' && props.isJudging) || (state === 'rendering' && props.isJudging), isFailed: Boolean(failTag) },
   ];
 
-  if (regenerating || failTag) {
-    stages.push({
+  if (props.isRegenerating || failTag)
+  {
+    baseStages.push({
       id: 'regenerating',
-      label: 'regenerating',
-      status: regenerating ? 'active' : 'pending',
+      rank: 3,
+      isCurrentActive: props.isRegenerating,
+      isFailed: false,
     });
   }
 
-  stages.push(
-    {
-      id: 'video',
-      label: videoLabel,
-      status: state === 'rendering'
-        ? 'active'
-        : ['audio', 'muxing', 'done'].includes(state)
-          ? 'completed'
-          : 'pending',
-    },
-    {
-      id: 'audio',
-      label: 'audio',
-      status: state === 'audio'
-        ? 'active'
-        : ['muxing', 'done'].includes(state)
-          ? 'completed'
-          : 'pending',
-    },
-    {
-      id: 'muxing',
-      label: 'muxing',
-      status: state === 'muxing'
-        ? 'active'
-        : state === 'done'
-          ? 'completed'
-          : 'pending',
-    },
-    {
-      id: 'done',
-      label: 'done',
-      status: state === 'done'
-        ? 'completed'
-        : state === 'failed'
-          ? 'failed'
-          : 'pending',
-    }
+  baseStages.push(
+    { id: 'video', rank: 4, isCurrentActive: state === 'rendering' && !props.isJudging, isFailed: false },
+    { id: 'audio', rank: 5, isCurrentActive: state === 'audio', isFailed: false },
+    { id: 'muxing', rank: 6, isCurrentActive: state === 'muxing', isFailed: false },
+    { id: 'done', rank: 7, isCurrentActive: false, isFailed: false }
   );
 
-  return stages;
+  return baseStages.map((s) => ({
+    id: s.id,
+    label: computeStageLabel(s.id, failTag, props.videoProgress),
+    status: resolveStageStatus(s.rank, currentRank, isFailed, s.isCurrentActive, s.isFailed),
+  }));
 });
 </script>

@@ -11,4 +11,4 @@ Route::get('/', function (): View
   return view('welcome');
 });
 
-Route::get('/media/{path}', [MediaController::class, 'show'])->where('path', '.*');
+Route::middleware('throttle:120,1')->get('/media/{path}', [MediaController::class, 'show'])->where('path', '.*');

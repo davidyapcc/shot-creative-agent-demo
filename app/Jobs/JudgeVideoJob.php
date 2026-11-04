@@ -47,16 +47,11 @@ class JudgeVideoJob implements ShouldQueue
 
     Judgement::create($verdict->toModelAttributes($shot->id, JudgementStage::Video));
 
-    $tag = $verdict->hardFailTags[0] ?? null;
-
-    JudgeVerdictRecorded::dispatch(
-      briefId: $this->briefId,
-      shotId: $this->shotId,
-      stage: JudgementStage::Video,
-      verdict: $verdict->verdict,
-      tag: $tag,
-      hardFailTags: $verdict->hardFailTags,
-      reason: $verdict->reason,
+    JudgeVerdictRecorded::dispatchFromVerdict(
+      $this->briefId,
+      $this->shotId,
+      JudgementStage::Video,
+      $verdict,
     );
 
     if ($verdict->isPass())

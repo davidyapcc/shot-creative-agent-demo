@@ -25,6 +25,8 @@ class PollVideoRenderJob implements ShouldQueue
 
   public const POLL_DELAY_SECONDS = 10;
   public const MAX_POLL_MINUTES = 10;
+  public const DEFAULT_PENDING_PROGRESS = 40;
+  public const COMPLETED_PROGRESS = 100;
 
   /**
    * The number of times the job may be attempted.
@@ -70,7 +72,7 @@ class PollVideoRenderJob implements ShouldQueue
 
     if ($result->isPending())
     {
-      $progress = $result->progress ?? 40;
+      $progress = $result->progress ?? self::DEFAULT_PENDING_PROGRESS;
       VideoProgressUpdated::dispatch($this->briefId, $this->shotId, $progress);
 
       $this->release(self::POLL_DELAY_SECONDS);
@@ -98,7 +100,7 @@ class PollVideoRenderJob implements ShouldQueue
 
     $shot->transitionTo(ShotState::JudgingVideo);
 
-    VideoProgressUpdated::dispatch($this->briefId, $this->shotId, 100);
+    VideoProgressUpdated::dispatch($this->briefId, $this->shotId, self::COMPLETED_PROGRESS);
     ShotUpdated::dispatch($shot);
 
     $judgeJob = new JudgeVideoJob($shot->id, $shot->brief_id);

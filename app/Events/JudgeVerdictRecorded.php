@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Events;
 
+use App\DTOs\JudgementResult;
 use App\Enums\JudgementStage;
 use App\Enums\JudgementVerdict;
 use Illuminate\Broadcasting\Channel;
@@ -27,6 +28,36 @@ class JudgeVerdictRecorded implements ShouldBroadcastNow
     public readonly ?string $reason = null,
   )
   {
+  }
+
+  public static function fromVerdict(
+    int $briefId,
+    int $shotId,
+    JudgementStage $stage,
+    JudgementResult $verdict,
+  ): self
+  {
+    $tag = $verdict->hardFailTags[0] ?? null;
+
+    return new self(
+      briefId: $briefId,
+      shotId: $shotId,
+      stage: $stage,
+      verdict: $verdict->verdict,
+      tag: $tag,
+      hardFailTags: $verdict->hardFailTags,
+      reason: $verdict->reason,
+    );
+  }
+
+  public static function dispatchFromVerdict(
+    int $briefId,
+    int $shotId,
+    JudgementStage $stage,
+    JudgementResult $verdict,
+  ): void
+  {
+    event(self::fromVerdict($briefId, $shotId, $stage, $verdict));
   }
 
   /**

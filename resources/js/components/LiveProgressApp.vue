@@ -115,8 +115,9 @@
           <!-- Live Stage Stream Component -->
           <StageStream
             :brief-state="briefState"
-            :video-progress="videoProgress"
+            :video-progress="overallVideoProgress"
             :judge-failure-tag="judgeFailureTag"
+            :is-judging="isJudging"
             :is-regenerating="isRegenerating"
             :events="streamEvents"
           />
@@ -158,7 +159,7 @@
               v-for="shot in shots"
               :key="shot.id"
               :shot="shot"
-              :video-progress="shotVideoProgress[shot.id] || videoProgress"
+              :video-progress="shotVideoProgress[shot.id] || 0"
             />
           </div>
 
@@ -205,10 +206,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { initEcho } from '../echo';
 import StageStream from './StageStream.vue';
 import ShotCard from './ShotCard.vue';
+
+const MAX_PROMPT_PREVIEW_LENGTH = 35;
 
 const presets = [
   '15s product teaser, rainy Tokyo, neon',
@@ -228,8 +231,8 @@ const finalVideoPath = ref(null);
 
 const shots = ref([]);
 const shotVideoProgress = ref({});
-const videoProgress = ref(0);
 const judgeFailureTag = ref(null);
+const isJudging = ref(false);
 const isRegenerating = ref(false);
 
 const streamEvents = ref([]);
@@ -238,34 +241,55 @@ const connectionStatus = ref('connecting');
 let echo = null;
 let activeChannel = null;
 
+const overallVideoProgress = computed(() => {
+  const values = Object.values(shotVideoProgress.value);
+  if (values.length === 0)
+  {
+    return 0;
+  }
+  const sum = values.reduce((acc, curr) => acc + curr, 0);
+  return Math.round(sum / values.length);
+});
+
 onMounted(() => {
   setupEcho();
 
-  // Check URL query param for existing brief: e.g. ?brief_id=1
   const params = new URLSearchParams(window.location.search);
   const briefId = params.get('brief_id');
-  if (briefId) {
+  if (briefId)
+  {
     loadBrief(Number(briefId));
   }
 });
 
 onBeforeUnmount(() => {
-  if (activeChannel) {
-    activeChannel.stopListening('.BriefStateChanged');
-    activeChannel.stopListening('.VideoProgressUpdated');
-    activeChannel.stopListening('.ShotUpdated');
-    activeChannel.stopListening('.JudgeVerdictRecorded');
-  }
-  if (echo) {
+  detachChannelListeners(activeChannel);
+  if (echo)
+  {
     echo.disconnect();
   }
 });
 
-function setupEcho() {
-  try {
+function detachChannelListeners(channel)
+{
+  if (!channel)
+  {
+    return;
+  }
+  channel.stopListening('.BriefStateChanged');
+  channel.stopListening('.VideoProgressUpdated');
+  channel.stopListening('.ShotUpdated');
+  channel.stopListening('.JudgeVerdictRecorded');
+}
+
+function setupEcho()
+{
+  try
+  {
     echo = initEcho();
 
-    if (echo.connector && echo.connector.pusher) {
+    if (echo.connector && echo.connector.pusher)
+    {
       echo.connector.pusher.connection.bind('connected', () => {
         connectionStatus.value = 'connected';
       });
@@ -276,19 +300,26 @@ function setupEcho() {
         connectionStatus.value = 'connecting';
       });
     }
-  } catch (err) {
+  }
+  catch (err)
+  {
     console.error('Failed to initialize Echo:', err);
     connectionStatus.value = 'error';
   }
 }
 
-async function submitBrief() {
-  if (!promptInput.value.trim()) return;
+async function submitBrief()
+{
+  if (!promptInput.value.trim())
+  {
+    return;
+  }
 
   isSubmitting.value = true;
   errorMessage.value = null;
 
-  try {
+  try
+  {
     const response = await fetch('/briefs', {
       method: 'POST',
       headers: {
@@ -300,49 +331,64 @@ async function submitBrief() {
 
     const json = await response.json();
 
-    if (!response.ok || !json.success) {
+    if (!response.ok || !json.success)
+    {
       errorMessage.value = json.error?.message || 'Failed to submit brief';
       return;
     }
 
     const brief = json.data.brief;
-    activeBriefId.value = brief.id;
-    briefState.value = brief.state;
-    shots.value = [];
-    shotVideoProgress.value = {};
-    videoProgress.value = 0;
-    judgeFailureTag.value = null;
-    isRegenerating.value = false;
-    audioPath.value = null;
-    finalVideoPath.value = null;
-    streamEvents.value = [];
+    resetActiveState(brief);
 
-    // Push initial submission event to stage stream
-    addStreamEvent('BriefSubmitted', `Brief #${brief.id} enqueued: "${brief.prompt.slice(0, 35)}..."`);
+    const preview = brief.prompt.slice(0, MAX_PROMPT_PREVIEW_LENGTH);
+    addStreamEvent('BriefSubmitted', `Brief #${brief.id} enqueued: "${preview}..."`);
 
-    // Subscribe to Reverb WebSocket channel without reload!
     subscribeToBrief(brief.id);
+    fetchBriefMetadata(brief.id);
 
-    // Update browser URL without reloading
     const newUrl = `${window.location.pathname}?brief_id=${brief.id}`;
     window.history.pushState({ path: newUrl }, '', newUrl);
-
-  } catch (err) {
+  }
+  catch (err)
+  {
     errorMessage.value = err.message || 'Network error submitting brief';
-  } finally {
+  }
+  finally
+  {
     isSubmitting.value = false;
   }
 }
 
-async function loadBrief(id) {
-  try {
+function resetActiveState(brief)
+{
+  activeBriefId.value = brief.id;
+  briefState.value = brief.state;
+  shots.value = [];
+  shotVideoProgress.value = {};
+  judgeFailureTag.value = null;
+  isJudging.value = false;
+  isRegenerating.value = false;
+  audioPath.value = null;
+  finalVideoPath.value = null;
+  streamEvents.value = [];
+}
+
+async function loadBrief(id)
+{
+  try
+  {
     const response = await fetch(`/briefs/${id}`, {
       headers: { 'Accept': 'application/json' },
     });
-    if (!response.ok) return;
+    if (!response.ok)
+    {
+      errorMessage.value = `Failed to load brief #${id}`;
+      return;
+    }
 
     const json = await response.json();
-    if (json.success && json.data.brief) {
+    if (json.success && json.data.brief)
+    {
       const brief = json.data.brief;
       activeBriefId.value = brief.id;
       briefState.value = brief.state;
@@ -350,24 +396,42 @@ async function loadBrief(id) {
       audioPath.value = brief.audio_path;
       finalVideoPath.value = brief.final_video_path;
       shots.value = brief.shots || [];
+
+      inspectFailedJudgements(shots.value);
       subscribeToBrief(brief.id);
     }
-  } catch (e) {
+  }
+  catch (e)
+  {
+    errorMessage.value = `Error loading brief #${id}`;
     console.error('Error loading brief:', e);
   }
 }
 
-function subscribeToBrief(briefId) {
-  if (!echo) {
+function inspectFailedJudgements(loadedShots)
+{
+  for (const shot of loadedShots)
+  {
+    if (shot.judgements && shot.judgements.length > 0)
+    {
+      const latest = shot.judgements[shot.judgements.length - 1];
+      if (latest.verdict === 'fail')
+      {
+        judgeFailureTag.value = latest.hard_fail_tags?.[0] || 'failed';
+        break;
+      }
+    }
+  }
+}
+
+function subscribeToBrief(briefId)
+{
+  if (!echo)
+  {
     setupEcho();
   }
 
-  if (activeChannel) {
-    activeChannel.stopListening('.BriefStateChanged');
-    activeChannel.stopListening('.VideoProgressUpdated');
-    activeChannel.stopListening('.ShotUpdated');
-    activeChannel.stopListening('.JudgeVerdictRecorded');
-  }
+  detachChannelListeners(activeChannel);
 
   const channelName = `briefs.${briefId}`;
   activeChannel = echo.channel(channelName);
@@ -376,64 +440,87 @@ function subscribeToBrief(briefId) {
     briefState.value = data.to;
     addStreamEvent('BriefStateChanged', `Transitioned from ${data.from} to ${data.to}`);
 
-    if (data.to === 'audio' || data.to === 'muxing' || data.to === 'done') {
-      // Refresh full brief to capture audio_path or final_video_path
+    if (data.to === 'audio' || data.to === 'muxing' || data.to === 'done')
+    {
       fetchBriefMetadata(briefId);
     }
   });
 
   activeChannel.listen('.VideoProgressUpdated', (data) => {
-    videoProgress.value = data.progress;
-    if (data.shotId) {
-      shotVideoProgress.value[data.shotId] = data.progress;
+    if (data.shotId)
+    {
+      shotVideoProgress.value = { ...shotVideoProgress.value, [data.shotId]: data.progress };
     }
     addStreamEvent('VideoProgressUpdated', `Shot #${data.shotId || ''} video progress ${data.progress}%`);
   });
 
   activeChannel.listen('.ShotUpdated', (data) => {
     const updatedShot = data.shot;
-    if (!updatedShot) return;
+    if (!updatedShot)
+    {
+      return;
+    }
 
-    const existingIndex = shots.value.findIndex(s => s.id === updatedShot.id);
-    if (existingIndex >= 0) {
-      shots.value[existingIndex] = { ...shots.value[existingIndex], ...updatedShot };
-    } else {
-      shots.value.push(updatedShot);
-      shots.value.sort((a, b) => a.sequence - b.sequence);
+    if (updatedShot.state === 'judging_image' || updatedShot.state === 'judging_video')
+    {
+      isJudging.value = true;
+    }
+
+    const existingIndex = shots.value.findIndex((s) => s.id === updatedShot.id);
+    if (existingIndex >= 0)
+    {
+      shots.value = shots.value.map((s, idx) => idx === existingIndex ? { ...s, ...updatedShot } : s);
+    }
+    else
+    {
+      shots.value = [...shots.value, updatedShot].sort((a, b) => a.sequence - b.sequence);
     }
 
     addStreamEvent('ShotUpdated', `Shot #${updatedShot.sequence} state is ${updatedShot.state}`);
   });
 
   activeChannel.listen('.JudgeVerdictRecorded', (data) => {
+    isJudging.value = false;
     const verdictDetail = `${data.stage} verdict: ${data.verdict.toUpperCase()}` +
       (data.tag ? ` (fail: ${data.tag})` : '');
     addStreamEvent('JudgeVerdictRecorded', verdictDetail, data.verdict);
 
-    if (data.verdict === 'fail') {
+    if (data.verdict === 'fail')
+    {
       judgeFailureTag.value = data.tag || (data.hardFailTags ? data.hardFailTags[0] : 'failed');
     }
   });
 }
 
-async function fetchBriefMetadata(briefId) {
-  try {
+async function fetchBriefMetadata(briefId)
+{
+  try
+  {
     const response = await fetch(`/briefs/${briefId}`);
-    if (response.ok) {
+    if (response.ok)
+    {
       const json = await response.json();
-      if (json.data?.brief) {
+      if (json.data?.brief)
+      {
         audioPath.value = json.data.brief.audio_path;
         finalVideoPath.value = json.data.brief.final_video_path;
         styleAnchor.value = json.data.brief.style_anchor;
+        if (json.data.brief.shots?.length > 0)
+        {
+          shots.value = json.data.brief.shots;
+        }
       }
     }
-  } catch (e) {
-    // silently catch background refresh
+  }
+  catch (e)
+  {
+    console.warn('Could not refresh brief metadata:', e);
   }
 }
 
-function addStreamEvent(name, detail, verdict = null) {
+function addStreamEvent(name, detail, verdict = null)
+{
   const time = new Date().toLocaleTimeString();
-  streamEvents.value.push({ name, detail, time, verdict });
+  streamEvents.value = [...streamEvents.value, { name, detail, time, verdict }];
 }
 </script>

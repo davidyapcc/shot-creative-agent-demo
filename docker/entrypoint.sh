@@ -20,6 +20,11 @@ fi
 if [ "$1" = "php" ] && [ "$2" = "artisan" ] && [ "$3" = "serve" ]; then
   php artisan migrate --force --no-interaction
 
+  # Remove stale hot-reload file if present from host
+  if [ -f "public/hot" ]; then
+    rm -f public/hot
+  fi
+
   if [ ! -f "public/build/manifest.json" ] && command -v npm >/dev/null 2>&1; then
     echo "Building frontend assets..."
     npm install --ignore-scripts

@@ -37,6 +37,7 @@ class GenerateKeyframeJob implements ShouldQueue
 
     $shot = Shot::with('brief')->findOrFail($this->shotId);
     $shot->transitionTo(ShotState::GeneratingImage);
+    ShotUpdated::dispatch($shot);
 
     $imageBytes = $imageProvider->generateImage($shot->prompt, $shot->brief?->style_anchor);
     $keyframePath = "keyframes/brief_{$shot->brief_id}_shot_{$shot->id}.png";

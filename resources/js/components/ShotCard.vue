@@ -78,11 +78,11 @@
             <div class="w-full bg-zinc-800 rounded-full h-2 mb-2 overflow-hidden">
               <div
                 class="bg-amber-400 h-2 rounded-full transition-all duration-300"
-                :style="{ width: `${videoProgress || 40}%` }"
+                :style="{ width: `${videoProgress}%` }"
               ></div>
             </div>
             <span class="text-[11px] text-zinc-400 font-mono">
-              Rendering video {{ videoProgress || 40 }}%...
+              Rendering video {{ videoProgress }}%...
             </span>
           </div>
           <div v-else class="flex flex-col items-center justify-center text-zinc-600 p-3 text-center">
@@ -130,16 +130,9 @@
       </div>
 
       <!-- Judge Reason -->
-      <p v-if="latestJudgement.reason" class="text-zinc-300 text-[11px] leading-relaxed mb-2 italic">
+      <p v-if="latestJudgement.reason" class="text-zinc-300 text-[11px] leading-relaxed italic">
         "{{ latestJudgement.reason }}"
       </p>
-
-      <!-- Rubric Scores Breakdown -->
-      <div v-if="latestJudgement.scores && Object.keys(latestJudgement.scores).length > 0" class="flex flex-wrap gap-2 text-[10px] font-mono text-zinc-400 border-t border-zinc-800/60 pt-2">
-        <span v-for="(score, dim) in latestJudgement.scores" :key="dim" class="rounded bg-zinc-950/60 px-1.5 py-0.5 border border-zinc-800">
-          {{ formatDimension(dim) }}: <strong :class="score >= 3 ? 'text-emerald-400' : 'text-rose-400'">{{ score }}/5</strong>
-        </span>
-      </div>
     </div>
   </div>
 </template>
@@ -159,33 +152,54 @@ const props = defineProps({
 });
 
 const keyframeUrl = computed(() => {
-  if (props.shot.keyframe_url) return props.shot.keyframe_url;
-  if (props.shot.keyframe_path) return `/media/${props.shot.keyframe_path}`;
+  if (props.shot.keyframe_url)
+  {
+    return props.shot.keyframe_url;
+  }
+  if (props.shot.keyframe_path)
+  {
+    return `/media/${props.shot.keyframe_path}`;
+  }
   return null;
 });
 
 const videoUrl = computed(() => {
-  if (props.shot.video_url) return props.shot.video_url;
-  if (props.shot.video_path) return `/media/${props.shot.video_path}`;
+  if (props.shot.video_url)
+  {
+    return props.shot.video_url;
+  }
+  if (props.shot.video_path)
+  {
+    return `/media/${props.shot.video_path}`;
+  }
   return null;
 });
 
 const latestJudgement = computed(() => {
-  if (props.shot.latest_judgement) return props.shot.latest_judgement;
-  if (props.shot.judgements && props.shot.judgements.length > 0) {
-    return props.shot.judgements[props.shot.judgements.length - 1];
+  if (props.shot.latest_judgement)
+  {
+    return props.shot.latest_judgement;
+  }
+  if (props.shot.judgements && props.shot.judgements.length > 0)
+  {
+    const sorted = [...props.shot.judgements].sort((a, b) => a.id - b.id);
+    return sorted[sorted.length - 1];
   }
   return null;
 });
 
 const failureTags = computed(() => {
-  if (!latestJudgement.value) return [];
+  if (!latestJudgement.value)
+  {
+    return [];
+  }
   const tags = latestJudgement.value.hard_fail_tags || [];
   return Array.isArray(tags) ? tags : [];
 });
 
 const stateBadgeClass = computed(() => {
-  switch (props.shot.state) {
+  switch (props.shot.state)
+  {
     case 'done':
       return 'border-emerald-600/40 bg-emerald-950/40 text-emerald-300';
     case 'failed':
@@ -201,12 +215,12 @@ const stateBadgeClass = computed(() => {
   }
 });
 
-function formatState(state) {
-  if (!state) return 'pending';
+function formatState(state)
+{
+  if (!state)
+  {
+    return 'pending';
+  }
   return state.replace(/_/g, ' ');
-}
-
-function formatDimension(dim) {
-  return dim.replace(/_/g, ' ');
 }
 </script>
