@@ -55,6 +55,43 @@ class MuxFinalVideoJobTest extends TestCase
     $this->assertEqualsWithDelta(2.0, $this->durationSeconds($mp4), 0.05);
   }
 
+  public function test_final_video_length_follows_the_clips_when_audio_is_longer(): void
+  {
+    Storage::fake('s3');
+
+    $clip = $this->replayClip();
+
+    $brief = Brief::create([
+      'prompt' => '15s product teaser, rainy Tokyo, neon',
+      'state' => BriefState::Muxing,
+      'audio_path' => 'audio/brief_voiceover.wav',
+      'metadata' => [
+        'sound_effect_path' => 'audio/brief_sfx.wav',
+      ],
+    ]);
+
+    Storage::disk('s3')->put($brief->audio_path, $this->silentWav(5));
+    Storage::disk('s3')->put($brief->metadata['sound_effect_path'], $this->silentWav(5));
+
+    $this->createShot($brief, 1, ShotState::Done, 'videos/shot_1.mp4', $clip);
+    $this->createShot($brief, 2, ShotState::Done, 'videos/shot_2.mp4', $clip);
+
+    (new MuxFinalVideoJob($brief->id))->handle();
+
+    $mp4 = Storage::disk('s3')->get($brief->refresh()->final_video_path);
+    $this->assertEqualsWithDelta(2.0, $this->durationSeconds($mp4), 0.1);
+  }
+
+  private function silentWav(int $seconds): string
+  {
+    $sampleRate = 8000;
+    $data = str_repeat("\0\0", $sampleRate * $seconds);
+
+    return 'RIFF' . pack('V', 36 + strlen($data)) . 'WAVE'
+      . 'fmt ' . pack('VvvVVvv', 16, 1, 1, $sampleRate, $sampleRate * 2, 2, 16)
+      . 'data' . pack('V', strlen($data)) . $data;
+  }
+
   private function replayClip(): string
   {
     $provider = new ReplayVideoProvider(pendingPolls: 0);

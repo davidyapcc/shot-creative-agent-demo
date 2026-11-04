@@ -8,11 +8,14 @@ use App\Contracts\AudioProviderInterface;
 use App\DTOs\AudioResult;
 use App\Enums\BriefState;
 use App\Enums\ShotState;
+use App\Exceptions\ProviderRateLimitedException;
 use App\Jobs\GenerateAudioJob;
 use App\Jobs\MuxFinalVideoJob;
 use App\Models\Brief;
 use App\Models\Shot;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Queue\Middleware\RateLimited;
+use Illuminate\Queue\Middleware\ThrottlesExceptions;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
@@ -167,5 +170,96 @@ class GenerateAudioJobTest extends TestCase
 
     $this->assertSame(1, $provider->calls);
     Queue::assertNothingPushed();
+  }
+
+  public function test_audio_job_is_rate_limited_and_retries_for_two_hours(): void
+  {
+    $job = new GenerateAudioJob(1);
+
+    $middleware = $job->middleware();
+
+    $this->assertCount(2, $middleware);
+    $this->assertTrue(collect($middleware)->contains(fn (object $m): bool => $m instanceof RateLimited));
+    $this->assertTrue(collect($middleware)->contains(fn (object $m): bool => $m instanceof ThrottlesExceptions));
+    $this->assertEqualsWithDelta(now()->addHours(2)->getTimestamp(), $job->retryUntil()->getTimestamp(), 5);
+    $this->assertTrue($job->failOnTimeout);
+  }
+
+  public function test_provider_rate_limit_releases_the_job_for_a_later_retry(): void
+  {
+    $job = (new GenerateAudioJob(1))->withFakeQueueInteractions();
+
+    $this->throttle($job)->handle($job, function (): void
+    {
+      throw new ProviderRateLimitedException('ElevenLabs returned 429.');
+    });
+
+    $job->assertReleased();
+    $job->assertNotFailed();
+  }
+
+  public function test_other_provider_errors_fail_the_job_instead_of_retrying(): void
+  {
+    $job = (new GenerateAudioJob(1))->withFakeQueueInteractions();
+
+    $this->throttle($job)->handle($job, function (): void
+    {
+      throw new RuntimeException('ElevenLabs rejected the sound effect.');
+    });
+
+    $job->assertFailed();
+    $job->assertNotReleased();
+  }
+
+  public function test_rate_limited_generation_gives_back_the_claim_so_a_retry_can_generate(): void
+  {
+    Storage::fake('s3');
+    Queue::fake([MuxFinalVideoJob::class]);
+
+    $brief = Brief::create([
+      'prompt' => '15s product teaser, rainy Tokyo, neon',
+      'state' => BriefState::Audio,
+    ]);
+
+    $provider = new class implements AudioProviderInterface
+    {
+      public int $calls = 0;
+
+      public function generate(string $prompt, ?string $styleAnchor = null): AudioResult
+      {
+        $this->calls++;
+
+        if ($this->calls === 1)
+        {
+          throw new ProviderRateLimitedException('ElevenLabs returned 429.');
+        }
+
+        return new AudioResult(voiceover: 'VOICEOVER', soundEffect: 'SFX');
+      }
+    };
+
+    try
+    {
+      (new GenerateAudioJob($brief->id))->handle($provider);
+      $this->fail('The rate-limit error should escape the job.');
+    }
+    catch (ProviderRateLimitedException)
+    {
+      $brief->refresh();
+      $this->assertNull($brief->audio_path);
+      $this->assertArrayNotHasKey('sound_effect_path', $brief->metadata ?? []);
+    }
+
+    (new GenerateAudioJob($brief->id))->handle($provider);
+
+    $this->assertSame(2, $provider->calls);
+    $this->assertSame(BriefState::Muxing, $brief->refresh()->state);
+    Queue::assertPushed(MuxFinalVideoJob::class, 1);
+  }
+
+  private function throttle(GenerateAudioJob $job): ThrottlesExceptions
+  {
+    return collect($job->middleware())
+      ->first(fn (object $m): bool => $m instanceof ThrottlesExceptions);
   }
 }

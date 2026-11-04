@@ -6,6 +6,7 @@ namespace App\Services\Providers;
 
 use App\Contracts\AudioProviderInterface;
 use App\DTOs\AudioResult;
+use LogicException;
 
 class ReplayAudioProvider implements AudioProviderInterface
 {
@@ -20,8 +21,20 @@ class ReplayAudioProvider implements AudioProviderInterface
   public function generate(string $prompt, ?string $styleAnchor = null): AudioResult
   {
     return new AudioResult(
-      voiceover: base64_decode(self::VOICEOVER_WAV_BASE64, true) ?: '',
-      soundEffect: base64_decode(self::SOUND_EFFECT_WAV_BASE64, true) ?: '',
+      voiceover: $this->decodeFixture(self::VOICEOVER_WAV_BASE64, 'voiceover'),
+      soundEffect: $this->decodeFixture(self::SOUND_EFFECT_WAV_BASE64, 'sound effect'),
     );
+  }
+
+  private function decodeFixture(string $base64, string $label): string
+  {
+    $bytes = base64_decode($base64, true);
+
+    if ($bytes === false || $bytes === '')
+    {
+      throw new LogicException("Replay {$label} fixture is not valid base64.");
+    }
+
+    return $bytes;
   }
 }
