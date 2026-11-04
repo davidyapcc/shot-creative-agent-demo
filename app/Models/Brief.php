@@ -54,6 +54,18 @@ class Brief extends Model
   }
 
   /**
+   * Whether at least one shot passed its video judge, so there is a clip to mux.
+   */
+  public function hasPassingClip(): bool
+  {
+    return $this->shots()
+      ->where('state', ShotState::Done)
+      ->whereNotNull('video_path')
+      ->where('video_path', '!=', '')
+      ->exists();
+  }
+
+  /**
    * Fail the brief and any shot still in flight.
    */
   public function failWithInFlightShots(): void

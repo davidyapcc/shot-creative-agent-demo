@@ -7,6 +7,7 @@ namespace App\Jobs;
 use App\Enums\BriefState;
 use App\Models\Brief;
 use Illuminate\Bus\Batch;
+use Illuminate\Support\Facades\Log;
 
 class AdvanceBriefToAudioCallback
 {
@@ -25,10 +26,24 @@ class AdvanceBriefToAudioCallback
 
     $brief = Brief::find($this->briefId);
 
-    if ($brief !== null && !($brief->metadata['budget_exhausted'] ?? false) && $brief->state === BriefState::Rendering)
+    if ($brief === null || ($brief->metadata['budget_exhausted'] ?? false) || $brief->state !== BriefState::Rendering)
     {
-      $brief->transitionTo(BriefState::Audio);
-      GenerateAudioJob::dispatch($this->briefId);
+      return;
     }
+
+    if (!$brief->hasPassingClip())
+    {
+      // Every shot used up its video retries; audio would be a paid call for
+      // a brief that has nothing to mux.
+      Log::warning('No shot passed its video judge; failing the brief before audio.', [
+        'brief_id' => $brief->id,
+      ]);
+      $brief->failWithInFlightShots();
+
+      return;
+    }
+
+    $brief->transitionTo(BriefState::Audio);
+    GenerateAudioJob::dispatch($this->briefId);
   }
 }

@@ -61,13 +61,8 @@ class DegradedCompletion
   private function muxOrDegrade(Brief $brief): void
   {
     $brief->refresh();
-    $brief->load('shots');
 
-    $passed = $brief->shots->contains(fn (Shot $shot): bool => $shot->state === ShotState::Done
-      && is_string($shot->video_path)
-      && $shot->video_path !== '');
-
-    if (!$passed)
+    if (!$brief->hasPassingClip())
     {
       if ($brief->state->canTransitionTo(BriefState::Degraded))
       {
