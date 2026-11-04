@@ -148,7 +148,7 @@ class PipelineBroadcastsTest extends TestCase
     $videoProvider = $this->createMock(VideoProviderInterface::class);
     $videoProvider->expects($this->once())
       ->method('poll')
-      ->willReturn(VideoRenderResult::pending());
+      ->willReturn(VideoRenderResult::pending(45));
 
     (new PollVideoRenderJob($shot->id, 'render_123', $brief->id))->handle($videoProvider);
 
@@ -158,7 +158,7 @@ class PipelineBroadcastsTest extends TestCase
       {
         return $event->briefId === $brief->id
           && $event->shotId === $shot->id
-          && $event->progress === 40;
+          && $event->progress === 45;
       }
     );
   }

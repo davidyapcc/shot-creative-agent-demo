@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Enums\BriefState;
+use App\Enums\JudgementStage;
+use App\Enums\JudgementVerdict;
 use App\Enums\ShotState;
 use App\Events\BriefStateChanged;
 use App\Events\JudgeVerdictRecorded;
@@ -120,8 +122,8 @@ class BroadcastEventsTest extends TestCase
     $event = new JudgeVerdictRecorded(
       briefId: 42,
       shotId: 101,
-      stage: 'video',
-      verdict: 'fail',
+      stage: JudgementStage::Video,
+      verdict: JudgementVerdict::Fail,
       tag: 'anatomy',
       hardFailTags: ['anatomy'],
       reason: 'Hand distorted',

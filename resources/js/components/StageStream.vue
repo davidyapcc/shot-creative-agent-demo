@@ -105,6 +105,7 @@
 
 <script setup>
 import { computed } from 'vue';
+import { StageRank } from '../constants';
 
 const props = defineProps({
   briefState: {
@@ -133,18 +134,10 @@ const props = defineProps({
   },
 });
 
-const STAGE_RANKS = {
-  pending: 0,
-  planning: 1,
-  keyframes: 2,
-  judging: 3,
-  rendering: 4,
-  audio: 5,
-  muxing: 6,
-  done: 7,
-};
-
-const reversedEvents = computed(() => [...props.events].reverse());
+const reversedEvents = computed(() =>
+{
+  return [...props.events].reverse();
+});
 
 function computeStageLabel(stageId, failTag, progress)
 {
@@ -186,33 +179,72 @@ function resolveStageStatus(stageRank, currentRank, isFailed, isCurrentActive, i
   return 'pending';
 }
 
-const stageSequence = computed(() => {
-  const state = props.briefState || 'pending';
-  const isFailed = state === 'failed';
+const stageSequence = computed(() =>
+{
+  const state = (props.briefState || 'pending').toUpperCase();
+  const isFailed = props.briefState === 'failed';
   const failTag = props.judgeFailureTag;
-  const currentRank = isFailed ? (failTag ? STAGE_RANKS.judging : STAGE_RANKS.keyframes) : (STAGE_RANKS[state] || 0);
+  const currentRank = isFailed
+    ? (failTag ? StageRank.JUDGING : StageRank.KEYFRAMES)
+    : (StageRank[state] ?? StageRank.PENDING);
 
   const baseStages = [
-    { id: 'planning', rank: 1, isCurrentActive: state === 'planning', isFailed: false },
-    { id: 'keyframes', rank: 2, isCurrentActive: state === 'keyframes' && !props.isJudging, isFailed: isFailed && !failTag },
-    { id: 'judging', rank: 3, isCurrentActive: (state === 'keyframes' && props.isJudging) || (state === 'rendering' && props.isJudging), isFailed: Boolean(failTag) },
+    {
+      id: 'planning',
+      rank: StageRank.PLANNING,
+      isCurrentActive: props.briefState === 'planning',
+      isFailed: false,
+    },
+    {
+      id: 'keyframes',
+      rank: StageRank.KEYFRAMES,
+      isCurrentActive: props.briefState === 'keyframes' && !props.isJudging,
+      isFailed: isFailed && !failTag,
+    },
+    {
+      id: 'judging',
+      rank: StageRank.JUDGING,
+      isCurrentActive: (props.briefState === 'keyframes' && props.isJudging)
+        || (props.briefState === 'rendering' && props.isJudging),
+      isFailed: Boolean(failTag),
+    },
   ];
 
   if (props.isRegenerating || failTag)
   {
     baseStages.push({
       id: 'regenerating',
-      rank: 3,
+      rank: StageRank.JUDGING,
       isCurrentActive: props.isRegenerating,
       isFailed: false,
     });
   }
 
   baseStages.push(
-    { id: 'video', rank: 4, isCurrentActive: state === 'rendering' && !props.isJudging, isFailed: false },
-    { id: 'audio', rank: 5, isCurrentActive: state === 'audio', isFailed: false },
-    { id: 'muxing', rank: 6, isCurrentActive: state === 'muxing', isFailed: false },
-    { id: 'done', rank: 7, isCurrentActive: false, isFailed: false }
+    {
+      id: 'video',
+      rank: StageRank.RENDERING,
+      isCurrentActive: props.briefState === 'rendering' && !props.isJudging,
+      isFailed: false,
+    },
+    {
+      id: 'audio',
+      rank: StageRank.AUDIO,
+      isCurrentActive: props.briefState === 'audio',
+      isFailed: false,
+    },
+    {
+      id: 'muxing',
+      rank: StageRank.MUXING,
+      isCurrentActive: props.briefState === 'muxing',
+      isFailed: false,
+    },
+    {
+      id: 'done',
+      rank: StageRank.DONE,
+      isCurrentActive: false,
+      isFailed: false,
+    },
   );
 
   return baseStages.map((s) => ({

@@ -25,7 +25,7 @@ class PollVideoRenderJob implements ShouldQueue
 
   public const POLL_DELAY_SECONDS = 10;
   public const MAX_POLL_MINUTES = 10;
-  public const DEFAULT_PENDING_PROGRESS = 40;
+  public const DEFAULT_PENDING_PROGRESS = 0;
   public const COMPLETED_PROGRESS = 100;
 
   /**

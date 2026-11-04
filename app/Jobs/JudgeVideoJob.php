@@ -47,12 +47,12 @@ class JudgeVideoJob implements ShouldQueue
 
     Judgement::create($verdict->toModelAttributes($shot->id, JudgementStage::Video));
 
-    JudgeVerdictRecorded::dispatchFromVerdict(
+    event(JudgeVerdictRecorded::fromVerdict(
       $this->briefId,
       $this->shotId,
       JudgementStage::Video,
       $verdict,
-    );
+    ));
 
     if ($verdict->isPass())
     {

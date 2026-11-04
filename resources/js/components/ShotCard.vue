@@ -49,7 +49,7 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
             <span class="text-[11px]">
-              {{ shot.state === 'generating_image' ? 'Generating keyframe...' : 'Awaiting keyframe' }}
+              {{ shot.state === ShotState.GENERATING_IMAGE ? 'Generating keyframe...' : 'Awaiting keyframe' }}
             </span>
           </div>
         </div>
@@ -74,7 +74,7 @@
             playsinline
             class="h-full w-full object-cover"
           ></video>
-          <div v-else-if="shot.state === 'generating_video'" class="w-full p-4 flex flex-col items-center justify-center text-center">
+          <div v-else-if="shot.state === ShotState.GENERATING_VIDEO" class="w-full p-4 flex flex-col items-center justify-center text-center">
             <div class="w-full bg-zinc-800 rounded-full h-2 mb-2 overflow-hidden">
               <div
                 class="bg-amber-400 h-2 rounded-full transition-all duration-300"
@@ -110,7 +110,7 @@
           <span
             :class="[
               'inline-flex h-2 w-2 rounded-full',
-              latestJudgement.verdict === 'pass' ? 'bg-emerald-400' : 'bg-rose-400'
+              latestJudgement.verdict === Verdict.PASS ? 'bg-emerald-400' : 'bg-rose-400'
             ]"
           ></span>
           <span>Judge Verdict: {{ latestJudgement.verdict.toUpperCase() }}</span>
@@ -139,6 +139,7 @@
 
 <script setup>
 import { computed } from 'vue';
+import { ShotState, Verdict } from '../constants';
 
 const props = defineProps({
   shot: {
@@ -151,7 +152,8 @@ const props = defineProps({
   },
 });
 
-const keyframeUrl = computed(() => {
+const keyframeUrl = computed(() =>
+{
   if (props.shot.keyframe_url)
   {
     return props.shot.keyframe_url;
@@ -163,7 +165,8 @@ const keyframeUrl = computed(() => {
   return null;
 });
 
-const videoUrl = computed(() => {
+const videoUrl = computed(() =>
+{
   if (props.shot.video_url)
   {
     return props.shot.video_url;
@@ -175,7 +178,8 @@ const videoUrl = computed(() => {
   return null;
 });
 
-const latestJudgement = computed(() => {
+const latestJudgement = computed(() =>
+{
   if (props.shot.latest_judgement)
   {
     return props.shot.latest_judgement;
@@ -188,7 +192,8 @@ const latestJudgement = computed(() => {
   return null;
 });
 
-const failureTags = computed(() => {
+const failureTags = computed(() =>
+{
   if (!latestJudgement.value)
   {
     return [];
@@ -197,18 +202,20 @@ const failureTags = computed(() => {
   return Array.isArray(tags) ? tags : [];
 });
 
-const stateBadgeClass = computed(() => {
+const stateBadgeClass = computed(() =>
+{
   switch (props.shot.state)
   {
+    case ShotState.COMPLETED:
     case 'done':
       return 'border-emerald-600/40 bg-emerald-950/40 text-emerald-300';
-    case 'failed':
+    case ShotState.FAILED:
       return 'border-rose-600/40 bg-rose-950/40 text-rose-300';
-    case 'generating_image':
-    case 'generating_video':
+    case ShotState.GENERATING_IMAGE:
+    case ShotState.GENERATING_VIDEO:
       return 'border-amber-600/40 bg-amber-950/40 text-amber-300 animate-pulse';
-    case 'judging_image':
-    case 'judging_video':
+    case ShotState.JUDGING_IMAGE:
+    case ShotState.JUDGING_VIDEO:
       return 'border-purple-600/40 bg-purple-950/40 text-purple-300 animate-pulse';
     default:
       return 'border-zinc-700 bg-zinc-800 text-zinc-400';

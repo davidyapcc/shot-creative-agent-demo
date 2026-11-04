@@ -46,12 +46,12 @@ class JudgeKeyframeJob implements ShouldQueue
 
     Judgement::create($verdict->toModelAttributes($shot->id, JudgementStage::Image));
 
-    JudgeVerdictRecorded::dispatchFromVerdict(
+    event(JudgeVerdictRecorded::fromVerdict(
       $this->briefId,
       $this->shotId,
       JudgementStage::Image,
       $verdict,
-    );
+    ));
 
     ShotUpdated::dispatch($shot->refresh());
 

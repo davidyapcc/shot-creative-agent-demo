@@ -25,10 +25,11 @@ if [ "$1" = "php" ] && [ "$2" = "artisan" ] && [ "$3" = "serve" ]; then
     rm -f public/hot
   fi
 
-  if [ ! -f "public/build/manifest.json" ] && command -v npm >/dev/null 2>&1; then
-    echo "Building frontend assets..."
-    npm install --ignore-scripts
-    npm run build
+  if command -v npm >/dev/null 2>&1; then
+    if [ ! -f "public/build/manifest.json" ] || [ "${FORCE_FRONTEND_BUILD:-false}" = "true" ]; then
+      echo "Building frontend assets..."
+      npm run build 2>/dev/null || (npm install && npm run build)
+    fi
   fi
 fi
 

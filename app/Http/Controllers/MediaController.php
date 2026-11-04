@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Storage;
 
 class MediaController extends Controller
 {
-  private const ALLOWED_PREFIXES = ['keyframes/', 'videos/', 'audio/'];
+  private const ALLOWED_PREFIXES = ['keyframes/', 'videos/', 'audio/', 'final/'];
   private const ALLOWED_EXTENSIONS = ['png', 'jpg', 'jpeg', 'mp4', 'mp3', 'wav'];
 
   public function show(string $path): Response

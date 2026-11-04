@@ -73,6 +73,18 @@ class MediaDeliveryTest extends TestCase
     $response->assertStatus(404);
   }
 
+  public function test_media_route_serves_final_video_from_s3(): void
+  {
+    Storage::fake('s3');
+    Storage::disk('s3')->put('final/brief_1_final.mp4', 'fake-final-mp4-content');
+
+    $response = $this->get('/media/final/brief_1_final.mp4');
+
+    $response->assertStatus(200);
+    $response->assertHeader('Content-Type', 'video/mp4');
+    $this->assertSame('fake-final-mp4-content', $response->getContent());
+  }
+
   public function test_media_route_rejects_disallowed_extensions(): void
   {
     Storage::fake('s3');

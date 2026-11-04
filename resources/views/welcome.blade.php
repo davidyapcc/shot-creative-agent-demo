@@ -12,7 +12,7 @@
     <!-- Reverb Client Configuration -->
     <script>
       window.__CONFIG__ = {
-        reverbAppKey: "{{ config('broadcasting.connections.reverb.key', 'shot-creative-key') }}",
+        reverbAppKey: "{{ config('broadcasting.connections.reverb.key') }}",
         reverbHost: window.location.hostname,
         reverbPort: {{ (int) config('broadcasting.connections.reverb.options.port', 8080) }},
         reverbScheme: "{{ config('broadcasting.connections.reverb.options.scheme', 'http') }}",

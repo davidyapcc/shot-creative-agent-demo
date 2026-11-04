@@ -21,8 +21,8 @@ class JudgeVerdictRecorded implements ShouldBroadcastNow
   public function __construct(
     public readonly int $briefId,
     public readonly int $shotId,
-    public readonly JudgementStage|string $stage,
-    public readonly JudgementVerdict|string $verdict,
+    public readonly JudgementStage $stage,
+    public readonly JudgementVerdict $verdict,
     public readonly ?string $tag = null,
     public readonly array $hardFailTags = [],
     public readonly ?string $reason = null,
@@ -50,16 +50,6 @@ class JudgeVerdictRecorded implements ShouldBroadcastNow
     );
   }
 
-  public static function dispatchFromVerdict(
-    int $briefId,
-    int $shotId,
-    JudgementStage $stage,
-    JudgementResult $verdict,
-  ): void
-  {
-    event(self::fromVerdict($briefId, $shotId, $stage, $verdict));
-  }
-
   /**
    * @return array<int, Channel>
    */
@@ -83,8 +73,8 @@ class JudgeVerdictRecorded implements ShouldBroadcastNow
     return [
       'briefId' => $this->briefId,
       'shotId' => $this->shotId,
-      'stage' => $this->stage instanceof JudgementStage ? $this->stage->value : (string) $this->stage,
-      'verdict' => $this->verdict instanceof JudgementVerdict ? $this->verdict->value : (string) $this->verdict,
+      'stage' => $this->stage->value,
+      'verdict' => $this->verdict->value,
       'tag' => $this->tag,
       'hardFailTags' => $this->hardFailTags,
       'reason' => $this->reason,

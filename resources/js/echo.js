@@ -4,7 +4,6 @@ import Pusher from 'pusher-js';
 window.Pusher = Pusher;
 
 export const DEFAULT_REVERB_PORT = 8080;
-export const DEFAULT_REVERB_APP_KEY = 'shot-creative-key';
 export const DEFAULT_REVERB_SCHEME = 'http';
 
 export function initEcho(overrideConfig = {})
@@ -13,7 +12,12 @@ export function initEcho(overrideConfig = {})
   const host = overrideConfig.reverbHost || config.reverbHost || window.location.hostname;
   const port = overrideConfig.reverbPort || config.reverbPort || DEFAULT_REVERB_PORT;
   const scheme = overrideConfig.reverbScheme || config.reverbScheme || DEFAULT_REVERB_SCHEME;
-  const key = overrideConfig.reverbAppKey || config.reverbAppKey || DEFAULT_REVERB_APP_KEY;
+  const key = overrideConfig.reverbAppKey || config.reverbAppKey || '';
+
+  if (!key && typeof console !== 'undefined')
+  {
+    console.warn('Reverb app key is not configured.');
+  }
 
   return new Echo({
     broadcaster: 'reverb',
