@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
-use App\Contracts\AgentInterface;
 use App\Contracts\JudgeInterface;
 use App\Enums\JudgementStage;
 use App\Enums\ShotState;
@@ -33,7 +32,7 @@ class JudgeVideoJob implements ShouldQueue
     $this->onQueue('judge');
   }
 
-  public function handle(JudgeInterface $judge, AgentInterface $agent): void
+  public function handle(JudgeInterface $judge, ShotStepRetry $retry, Budget $budget): void
   {
     if ($this->batch()?->cancelled())
     {
@@ -42,7 +41,7 @@ class JudgeVideoJob implements ShouldQueue
 
     $shot = Shot::with('brief')->findOrFail($this->shotId);
 
-    if (!app(Budget::class)->chargeShotStep($shot, 'judge', 'judgeVideo'))
+    if (!$budget->chargeShotStep($shot, 'judge', 'judgeVideo'))
     {
       return;
     }
@@ -72,7 +71,7 @@ class JudgeVideoJob implements ShouldQueue
     else
     {
       ShotUpdated::dispatch($shot->refresh());
-      (new ShotStepRetry($agent))->afterFailure($shot, $verdict, JudgementStage::Video, $this->batch());
+      $retry->afterFailure($shot, $verdict, JudgementStage::Video, $this->batch());
     }
   }
 }

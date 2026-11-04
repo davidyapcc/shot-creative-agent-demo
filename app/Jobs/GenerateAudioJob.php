@@ -66,7 +66,7 @@ class GenerateAudioJob implements ShouldQueue
     return now()->addHours(self::RETRY_WINDOW_HOURS);
   }
 
-  public function handle(AudioProviderInterface $audioProvider): void
+  public function handle(AudioProviderInterface $audioProvider, Budget $budget): void
   {
     $brief = Brief::findOrFail($this->briefId);
 
@@ -79,8 +79,6 @@ class GenerateAudioJob implements ShouldQueue
     {
       return;
     }
-
-    $budget = app(Budget::class);
 
     if (!$budget->chargeOrDegrade($brief, 'audio', 'generate'))
     {

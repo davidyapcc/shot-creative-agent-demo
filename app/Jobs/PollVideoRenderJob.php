@@ -62,7 +62,7 @@ class PollVideoRenderJob implements ShouldQueue
     return now()->addMinutes(self::MAX_POLL_MINUTES);
   }
 
-  public function handle(VideoProviderInterface $videoProvider): void
+  public function handle(VideoProviderInterface $videoProvider, Budget $budget): void
   {
     if ($this->batch()?->cancelled())
     {
@@ -71,7 +71,7 @@ class PollVideoRenderJob implements ShouldQueue
 
     $shot = Shot::with('brief')->find($this->shotId);
 
-    if ($shot === null || !app(Budget::class)->chargeShotStep($shot, 'video', 'poll'))
+    if ($shot === null || !$budget->chargeShotStep($shot, 'video', 'poll'))
     {
       return;
     }

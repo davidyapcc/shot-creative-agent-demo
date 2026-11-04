@@ -13,6 +13,7 @@ use App\Jobs\GenerateAudioJob;
 use App\Jobs\MuxFinalVideoJob;
 use App\Models\Brief;
 use App\Models\Shot;
+use App\Services\Budget;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Queue\Middleware\RateLimited;
 use Illuminate\Queue\Middleware\ThrottlesExceptions;
@@ -61,7 +62,7 @@ class GenerateAudioJobTest extends TestCase
     };
 
     $job = new GenerateAudioJob($brief->id);
-    $job->handle($provider);
+    $job->handle($provider, app(Budget::class));
 
     $brief->refresh();
     $voiceoverPath = $brief->audio_path;
@@ -74,7 +75,7 @@ class GenerateAudioJobTest extends TestCase
     Queue::assertPushed(MuxFinalVideoJob::class, 1);
 
     $shot->update(['attempts' => 3]);
-    $job->handle($provider);
+    $job->handle($provider, app(Budget::class));
 
     $brief->refresh();
     $this->assertSame(1, $provider->calls);
@@ -112,7 +113,7 @@ class GenerateAudioJobTest extends TestCase
 
         if ($this->calls === 1)
         {
-          (new GenerateAudioJob($this->briefId))->handle($this);
+          (new GenerateAudioJob($this->briefId))->handle($this, app(Budget::class));
         }
 
         return new AudioResult(
@@ -122,7 +123,7 @@ class GenerateAudioJobTest extends TestCase
       }
     };
 
-    (new GenerateAudioJob($brief->id))->handle($provider);
+    (new GenerateAudioJob($brief->id))->handle($provider, app(Budget::class));
 
     $this->assertSame(1, $provider->calls);
     $this->assertNotNull($provider->claimedPath);
@@ -156,7 +157,7 @@ class GenerateAudioJobTest extends TestCase
 
     try
     {
-      $job->handle($provider);
+      $job->handle($provider, app(Budget::class));
       $this->fail('The provider failure should escape the job.');
     }
     catch (RuntimeException $exception)
@@ -166,7 +167,7 @@ class GenerateAudioJobTest extends TestCase
 
     $this->assertNotNull($brief->refresh()->audio_path);
 
-    $job->handle($provider);
+    $job->handle($provider, app(Budget::class));
 
     $this->assertSame(1, $provider->calls);
     Queue::assertNothingPushed();
@@ -240,7 +241,7 @@ class GenerateAudioJobTest extends TestCase
 
     try
     {
-      (new GenerateAudioJob($brief->id))->handle($provider);
+      (new GenerateAudioJob($brief->id))->handle($provider, app(Budget::class));
       $this->fail('The rate-limit error should escape the job.');
     }
     catch (ProviderRateLimitedException)
@@ -250,7 +251,7 @@ class GenerateAudioJobTest extends TestCase
       $this->assertArrayNotHasKey('sound_effect_path', $brief->metadata ?? []);
     }
 
-    (new GenerateAudioJob($brief->id))->handle($provider);
+    (new GenerateAudioJob($brief->id))->handle($provider, app(Budget::class));
 
     $this->assertSame(2, $provider->calls);
     $this->assertSame(BriefState::Muxing, $brief->refresh()->state);

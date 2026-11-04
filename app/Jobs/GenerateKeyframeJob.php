@@ -29,7 +29,7 @@ class GenerateKeyframeJob implements ShouldQueue
     $this->onQueue('generate');
   }
 
-  public function handle(ImageProviderInterface $imageProvider): void
+  public function handle(ImageProviderInterface $imageProvider, Budget $budget): void
   {
     if ($this->batch()?->cancelled())
     {
@@ -38,7 +38,7 @@ class GenerateKeyframeJob implements ShouldQueue
 
     $shot = Shot::with('brief')->findOrFail($this->shotId);
 
-    if (!app(Budget::class)->chargeShotStep($shot, 'image', 'generateImage'))
+    if (!$budget->chargeShotStep($shot, 'image', 'generateImage'))
     {
       return;
     }

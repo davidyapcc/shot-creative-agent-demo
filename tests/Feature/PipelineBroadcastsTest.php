@@ -27,6 +27,7 @@ use App\Jobs\PollVideoRenderJob;
 use App\Jobs\ProcessKeyframesJob;
 use App\Models\Brief;
 use App\Models\Shot;
+use App\Services\ShotStepRetry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Event;
@@ -73,7 +74,7 @@ class PipelineBroadcastsTest extends TestCase
     ]);
 
     $imageProvider = app(ImageProviderInterface::class);
-    (new GenerateKeyframeJob($shot->id, $brief->id))->handle($imageProvider);
+    (new GenerateKeyframeJob($shot->id, $brief->id))->handle($imageProvider, app(Budget::class));
 
     Event::assertDispatched(ShotUpdated::class, function (ShotUpdated $event) use ($shot): bool
     {
@@ -113,7 +114,7 @@ class PipelineBroadcastsTest extends TestCase
 
     Bus::fake([GenerateKeyframeJob::class, JudgeKeyframeJob::class]);
 
-    (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, app(AgentInterface::class));
+    (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(Budget::class));
 
     Event::assertDispatched(
       JudgeVerdictRecorded::class,
@@ -153,7 +154,7 @@ class PipelineBroadcastsTest extends TestCase
       ->method('poll')
       ->willReturn(VideoRenderResult::pending(45));
 
-    (new PollVideoRenderJob($shot->id, 'render_123', $brief->id))->handle($videoProvider);
+    (new PollVideoRenderJob($shot->id, 'render_123', $brief->id))->handle($videoProvider, app(Budget::class));
 
     Event::assertDispatched(
       VideoProgressUpdated::class,
@@ -202,7 +203,7 @@ class PipelineBroadcastsTest extends TestCase
 
     Bus::fake([PollVideoRenderJob::class]);
 
-    (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, app(AgentInterface::class));
+    (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(Budget::class));
 
     Event::assertDispatched(
       JudgeVerdictRecorded::class,

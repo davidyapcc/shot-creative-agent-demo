@@ -21,6 +21,9 @@ class ShotStepRetry
 
   public function __construct(
     private readonly AgentInterface $agent,
+    private readonly Budget $budget,
+    private readonly ShotVideoSubmitter $submitter,
+    private readonly VideoProviderInterface $videos,
   )
   {
   }
@@ -79,7 +82,7 @@ class ShotStepRetry
    */
   private function chargeRewrite(Shot $shot): bool
   {
-    if ($shot->brief !== null && !app(Budget::class)->chargeOrDegrade($shot->brief, 'agent', 'rewritePrompt'))
+    if ($shot->brief !== null && !$this->budget->chargeOrDegrade($shot->brief, 'agent', 'rewritePrompt'))
     {
       return false;
     }
@@ -146,7 +149,7 @@ class ShotStepRetry
 
   private function resubmitVideo(Shot $shot, ?Batch $batch): void
   {
-    $poll = app(ShotVideoSubmitter::class)->submit($shot, app(VideoProviderInterface::class));
+    $poll = $this->submitter->submit($shot, $this->videos);
 
     if ($poll === null)
     {
