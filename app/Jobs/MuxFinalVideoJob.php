@@ -49,10 +49,10 @@ class MuxFinalVideoJob implements ShouldQueue
       return;
     }
 
-    $exhausted = $brief->isBudgetExhausted();
+    $isBudgetExhausted = $brief->isBudgetExhausted();
     $clips = $this->passingClips($brief);
 
-    if ($exhausted && !$this->hasAudio($brief))
+    if ($isBudgetExhausted && !$this->hasAudio($brief))
     {
       $mp4 = $this->muxVideoOnly($clips);
     }
