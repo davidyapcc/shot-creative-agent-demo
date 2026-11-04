@@ -12,6 +12,7 @@ use App\Traits\FailsBriefOnJobFailure;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Log;
 
 class RenderShotsJob implements ShouldQueue
 {
@@ -49,6 +50,8 @@ class RenderShotsJob implements ShouldQueue
 
     if (empty($pollJobs))
     {
+      $this->failWhenNoShotCanRender($brief);
+
       return;
     }
 
@@ -57,5 +60,25 @@ class RenderShotsJob implements ShouldQueue
       ->then(new AdvanceBriefToAudioCallback($brief->id))
       ->catch(new FailBriefOnBatchFailureCallback($brief->id))
       ->dispatch();
+  }
+
+  /**
+   * Every shot used up its image retries, so no batch will ever advance the
+   * brief. A budget stop is left to DegradedCompletion, which owns that path.
+   */
+  private function failWhenNoShotCanRender(Brief $brief): void
+  {
+    $brief->refresh();
+
+    if ($brief->metadata['budget_exhausted'] ?? false)
+    {
+      return;
+    }
+
+    Log::warning('No shot passed its keyframe; failing the brief.', [
+      'brief_id' => $brief->id,
+    ]);
+
+    $brief->failWithInFlightShots();
   }
 }
