@@ -15,6 +15,7 @@ use App\Models\Shot;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use RuntimeException;
 use Tests\TestCase;
 
 class GenerateAudioJobTest extends TestCase
@@ -79,5 +80,92 @@ class GenerateAudioJobTest extends TestCase
     $this->assertSame('VOICEOVER', Storage::disk('s3')->get($voiceoverPath));
     $this->assertSame('SFX', Storage::disk('s3')->get($soundEffectPath));
     Queue::assertPushed(MuxFinalVideoJob::class, 1);
+  }
+
+  public function test_overlapping_audio_job_does_not_generate_twice(): void
+  {
+    Storage::fake('s3');
+    Queue::fake([MuxFinalVideoJob::class]);
+
+    $brief = Brief::create([
+      'prompt' => '15s product teaser, rainy Tokyo, neon',
+      'state' => BriefState::Audio,
+    ]);
+
+    $provider = new class($brief->id) implements AudioProviderInterface
+    {
+      public int $calls = 0;
+
+      public ?string $claimedPath = null;
+
+      public function __construct(private int $briefId)
+      {
+      }
+
+      public function generate(string $prompt, ?string $styleAnchor = null): AudioResult
+      {
+        $this->calls++;
+        $this->claimedPath = Brief::query()->findOrFail($this->briefId)->audio_path;
+
+        if ($this->calls === 1)
+        {
+          (new GenerateAudioJob($this->briefId))->handle($this);
+        }
+
+        return new AudioResult(
+          voiceover: 'VOICEOVER',
+          soundEffect: 'SFX',
+        );
+      }
+    };
+
+    (new GenerateAudioJob($brief->id))->handle($provider);
+
+    $this->assertSame(1, $provider->calls);
+    $this->assertNotNull($provider->claimedPath);
+    $this->assertSame('VOICEOVER', Storage::disk('s3')->get($brief->refresh()->audio_path));
+    Queue::assertPushed(MuxFinalVideoJob::class, 1);
+  }
+
+  public function test_failed_generation_is_not_repeated(): void
+  {
+    Storage::fake('s3');
+    Queue::fake([MuxFinalVideoJob::class]);
+
+    $brief = Brief::create([
+      'prompt' => '15s product teaser, rainy Tokyo, neon',
+      'state' => BriefState::Audio,
+    ]);
+
+    $provider = new class implements AudioProviderInterface
+    {
+      public int $calls = 0;
+
+      public function generate(string $prompt, ?string $styleAnchor = null): AudioResult
+      {
+        $this->calls++;
+
+        throw new RuntimeException('ElevenLabs rejected the sound effect.');
+      }
+    };
+
+    $job = new GenerateAudioJob($brief->id);
+
+    try
+    {
+      $job->handle($provider);
+      $this->fail('The provider failure should escape the job.');
+    }
+    catch (RuntimeException $exception)
+    {
+      $this->assertSame('ElevenLabs rejected the sound effect.', $exception->getMessage());
+    }
+
+    $this->assertNotNull($brief->refresh()->audio_path);
+
+    $job->handle($provider);
+
+    $this->assertSame(1, $provider->calls);
+    Queue::assertNothingPushed();
   }
 }
