@@ -61,9 +61,14 @@ class ShotStepRetry
       return;
     }
 
+    // The first rewrite overwrites shots.prompt, so keep the planned prompt
+    // here; every later rewrite must start from the scene as planned.
+    $originalPrompt = (string) ($metadata['original_prompt'] ?? $shot->prompt);
+    $metadata['original_prompt'] = $originalPrompt;
+
     $rewritten = $this->agent->rewritePrompt([
       'brief' => (string) $shot->brief?->prompt,
-      'original_prompt' => $shot->prompt,
+      'original_prompt' => $originalPrompt,
       'failed_scores' => $verdict->scores,
       'reason' => $verdict->reason,
       'previous_attempts' => $log,

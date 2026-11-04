@@ -107,6 +107,7 @@ class JudgeRetryTest extends TestCase
       'state' => ShotState::JudgingImage,
       'keyframe_path' => 'keyframes/shot_1.png',
       'metadata' => [
+        'original_prompt' => 'Shot 1: neon alley',
         'step_attempts' => ['image' => 2],
         'prompt_attempts' => [
           'image' => [
@@ -128,8 +129,41 @@ class JudgeRetryTest extends TestCase
     $this->assertSame([
       ['prompt' => 'Shot 1: neon alley', 'reason' => 'Left hand has six fingers.'],
     ], $agent->contexts[0]['previous_attempts']);
-    $this->assertSame('Shot 1: neon alley [rewrite]', $agent->contexts[0]['original_prompt']);
+    $this->assertSame('Shot 1: neon alley', $agent->contexts[0]['original_prompt']);
     $this->assertSame('Still six fingers.', $agent->contexts[0]['reason']);
+  }
+
+  public function test_every_rewrite_receives_the_planned_prompt_as_original_prompt(): void
+  {
+    // Arrange
+    Bus::fake();
+
+    $brief = Brief::create([
+      'prompt' => '15s product teaser, rainy Tokyo, neon',
+      'state' => BriefState::Keyframes,
+    ]);
+
+    $shot = Shot::create([
+      'brief_id' => $brief->id,
+      'sequence' => 1,
+      'prompt' => 'Shot 1: neon alley',
+      'state' => ShotState::JudgingImage,
+      'keyframe_path' => 'keyframes/shot_1.png',
+    ]);
+
+    $agent = new RecordingAgent();
+    $judge = $this->failingImageJudge('Left hand has six fingers.', ['anatomy' => 2, 'prompt_adherence' => 4, 'object_integrity' => 5], calls: 2);
+
+    // Act
+    (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $agent);
+    (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $agent);
+
+    // Assert
+    $this->assertCount(2, $agent->contexts);
+    $this->assertSame('Shot 1: neon alley', $agent->contexts[0]['original_prompt']);
+    $this->assertSame('Shot 1: neon alley', $agent->contexts[1]['original_prompt']);
+    $this->assertSame('Shot 1: neon alley [rewrite]', $shot->refresh()->prompt);
+    $this->assertSame('Shot 1: neon alley', $shot->metadata['original_prompt']);
   }
 
   public function test_image_step_stops_after_two_retries_without_failing_the_brief(): void
@@ -274,10 +308,10 @@ class JudgeRetryTest extends TestCase
   /**
    * @param array<string, int> $scores
    */
-  private function failingImageJudge(string $reason, array $scores): JudgeInterface
+  private function failingImageJudge(string $reason, array $scores, int $calls = 1): JudgeInterface
   {
     $judge = $this->createMock(JudgeInterface::class);
-    $judge->expects($this->once())
+    $judge->expects($this->exactly($calls))
       ->method('judgeImage')
       ->willReturn(new JudgementResult(
         scores: $scores,
