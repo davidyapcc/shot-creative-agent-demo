@@ -9,8 +9,12 @@ use App\Contracts\ImageProviderInterface;
 use App\Contracts\JudgeInterface;
 use App\Contracts\VideoProviderInterface;
 use App\Enums\BriefState;
-use App\Events\BriefStateChanged;
+use App\Enums\JudgementVerdict;
 use App\Enums\ShotState;
+use App\Events\BriefStateChanged;
+use App\Events\JudgeVerdictRecorded;
+use App\Events\ShotUpdated;
+use App\Events\VideoProgressUpdated;
 use App\Jobs\GenerateAudioJob;
 use App\Jobs\MuxFinalVideoJob;
 use App\Jobs\PlanBriefJob;
@@ -189,6 +193,48 @@ class WalkingSkeletonTest extends TestCase
       [BriefState::Audio, BriefState::Muxing],
       [BriefState::Muxing, BriefState::Done],
     ], $transitions);
+  }
+
+  public function test_full_pipeline_broadcasts_events_on_per_brief_channel(): void
+  {
+    Storage::fake('s3');
+    Event::fake([
+      BriefStateChanged::class,
+      VideoProgressUpdated::class,
+      ShotUpdated::class,
+      JudgeVerdictRecorded::class,
+    ]);
+
+    $response = $this->postJson('/briefs', [
+      'prompt' => '15s product teaser, rainy Tokyo, neon',
+    ]);
+
+    $response->assertStatus(202);
+    $briefId = $response->json('data.brief.id');
+
+    Event::assertDispatched(BriefStateChanged::class, function (BriefStateChanged $event) use ($briefId): bool
+    {
+      return $event->briefId === $briefId;
+    });
+
+    Event::assertDispatched(ShotUpdated::class, function (ShotUpdated $event) use ($briefId): bool
+    {
+      return $event->shot->brief_id === $briefId;
+    });
+
+    Event::assertDispatched(VideoProgressUpdated::class, function (VideoProgressUpdated $event) use ($briefId): bool
+    {
+      return $event->briefId === $briefId;
+    });
+
+    Event::assertDispatched(JudgeVerdictRecorded::class, function (JudgeVerdictRecorded $event) use ($briefId): bool
+    {
+      $isPass = $event->verdict instanceof JudgementVerdict
+        ? $event->verdict === JudgementVerdict::Pass
+        : $event->verdict === 'pass';
+
+      return $event->briefId === $briefId && $isPass;
+    });
   }
 
   private function createShot(Brief $brief, int $sequence, ShotState $state): Shot

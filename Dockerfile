@@ -9,6 +9,8 @@ RUN apk add --no-cache \
     curl \
     linux-headers \
     ffmpeg \
+    nodejs \
+    npm \
     $PHPIZE_DEPS \
     && docker-php-ext-install pdo pdo_pgsql pgsql pcntl bcmath zip \
     && rm -rf /tmp/pear

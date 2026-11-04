@@ -71,7 +71,9 @@ class PollVideoRenderJobTest extends TestCase
 
     $this->assertTrue($job->job->isReleased(), 'Job should be released back to queue.');
     $this->assertSame(PollVideoRenderJob::POLL_DELAY_SECONDS, $job->job->releaseDelay);
-    $this->assertSame(ShotState::GeneratingVideo, $shot->refresh()->state);
+    $shot->refresh();
+    $this->assertSame(ShotState::GeneratingVideo, $shot->state);
+    $this->assertSame(PollVideoRenderJob::DEFAULT_PENDING_PROGRESS, $shot->metadata['video_progress']);
   }
 
   public function test_pending_render_does_not_block_worker_from_processing_subsequent_jobs(): void
@@ -135,6 +137,7 @@ class PollVideoRenderJobTest extends TestCase
       'sequence' => 1,
       'prompt' => 'Shot 1 prompt',
       'state' => ShotState::GeneratingVideo,
+      'metadata' => ['render_id' => 'test-render-id'],
     ]);
 
     $videoBytes = 'FAKE_MP4_BYTES';
@@ -150,6 +153,8 @@ class PollVideoRenderJobTest extends TestCase
     $shot->refresh();
 
     $this->assertSame(ShotState::JudgingVideo, $shot->state);
+    $this->assertSame(PollVideoRenderJob::COMPLETED_PROGRESS, $shot->metadata['video_progress']);
+    $this->assertSame('test-render-id', $shot->metadata['render_id']);
     $this->assertNotNull($shot->video_path);
     Storage::disk('s3')->assertExists($shot->video_path);
     $this->assertSame($videoBytes, Storage::disk('s3')->get($shot->video_path));

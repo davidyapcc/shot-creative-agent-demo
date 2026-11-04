@@ -44,6 +44,6 @@ class Shot extends Model
 
   public function judgements(): HasMany
   {
-    return $this->hasMany(Judgement::class);
+    return $this->hasMany(Judgement::class)->orderBy('id');
   }
 }

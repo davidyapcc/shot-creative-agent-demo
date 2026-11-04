@@ -6,6 +6,7 @@ namespace App\Jobs;
 
 use App\Contracts\ImageProviderInterface;
 use App\Enums\ShotState;
+use App\Events\ShotUpdated;
 use App\Models\Shot;
 use App\Traits\FailsBriefOnJobFailure;
 use Illuminate\Bus\Batchable;
@@ -36,6 +37,7 @@ class GenerateKeyframeJob implements ShouldQueue
 
     $shot = Shot::with('brief')->findOrFail($this->shotId);
     $shot->transitionTo(ShotState::GeneratingImage);
+    ShotUpdated::dispatch($shot);
 
     $imageBytes = $imageProvider->generateImage($shot->prompt, $shot->brief?->style_anchor);
     $keyframePath = "keyframes/brief_{$shot->brief_id}_shot_{$shot->id}.png";
@@ -47,5 +49,7 @@ class GenerateKeyframeJob implements ShouldQueue
     ]);
 
     $shot->transitionTo(ShotState::JudgingImage);
+
+    ShotUpdated::dispatch($shot);
   }
 }

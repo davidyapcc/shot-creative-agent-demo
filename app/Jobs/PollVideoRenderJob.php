@@ -6,6 +6,8 @@ namespace App\Jobs;
 
 use App\Contracts\VideoProviderInterface;
 use App\Enums\ShotState;
+use App\Events\ShotUpdated;
+use App\Events\VideoProgressUpdated;
 use App\Models\Shot;
 use App\Traits\FailsBriefOnJobFailure;
 use DateTimeInterface;
@@ -23,6 +25,8 @@ class PollVideoRenderJob implements ShouldQueue
 
   public const POLL_DELAY_SECONDS = 10;
   public const MAX_POLL_MINUTES = 10;
+  public const DEFAULT_PENDING_PROGRESS = 0;
+  public const COMPLETED_PROGRESS = 100;
 
   /**
    * The number of times the job may be attempted.
@@ -68,6 +72,14 @@ class PollVideoRenderJob implements ShouldQueue
 
     if ($result->isPending())
     {
+      $progress = $result->progress ?? self::DEFAULT_PENDING_PROGRESS;
+      $pendingShot = Shot::find($this->shotId);
+      if ($pendingShot !== null)
+      {
+        $this->storeVideoProgress($pendingShot, $progress);
+      }
+      VideoProgressUpdated::dispatch($this->briefId, $this->shotId, $progress);
+
       $this->release(self::POLL_DELAY_SECONDS);
 
       return;
@@ -87,11 +99,14 @@ class PollVideoRenderJob implements ShouldQueue
 
     Storage::disk('s3')->put($videoPath, (string) $result->videoContent);
 
-    $shot->update([
+    $this->storeVideoProgress($shot, self::COMPLETED_PROGRESS, [
       'video_path' => $videoPath,
     ]);
 
     $shot->transitionTo(ShotState::JudgingVideo);
+
+    VideoProgressUpdated::dispatch($this->briefId, $this->shotId, self::COMPLETED_PROGRESS);
+    ShotUpdated::dispatch($shot);
 
     $judgeJob = new JudgeVideoJob($shot->id, $shot->brief_id);
 
@@ -103,5 +118,18 @@ class PollVideoRenderJob implements ShouldQueue
     {
       dispatch($judgeJob);
     }
+  }
+
+  /**
+   * @param array<string, mixed> $attributes
+   */
+  private function storeVideoProgress(Shot $shot, int $progress, array $attributes = []): void
+  {
+    $shot->update([
+      ...$attributes,
+      'metadata' => array_merge($shot->metadata ?? [], [
+        'video_progress' => $progress,
+      ]),
+    ]);
   }
 }

@@ -35,7 +35,7 @@ class BriefController extends Controller
 
   public function show(int $id): JsonResponse
   {
-    $brief = Brief::with('shots')->findOrFail($id);
+    $brief = Brief::with(['shots.judgements'])->findOrFail($id);
 
     return response()->json([
       'success' => true,

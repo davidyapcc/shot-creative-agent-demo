@@ -25,7 +25,7 @@ services:
       REVERB_APP_ID: ${REVERB_APP_ID:-shot-creative}
       REVERB_APP_KEY: ${REVERB_APP_KEY:-shot-creative-key}
       REVERB_APP_SECRET: ${REVERB_APP_SECRET:-shot-creative-secret}
-      REVERB_HOST: "0.0.0.0"
+      REVERB_HOST: reverb
       REVERB_PORT: 8080
       REVERB_SCHEME: http
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
@@ -36,6 +36,8 @@ services:
       AWS_USE_PATH_STYLE_ENDPOINT: "true"
     volumes:
       - .:/var/www/html
+      # Container-local modules. npm install must not write Linux binaries over the host folder.
+      - frontend_node_modules:/var/www/html/node_modules
     depends_on:
       postgres:
         condition: service_healthy
@@ -68,6 +70,12 @@ services:
       REDIS_PORT: 6379
       QUEUE_CONNECTION: redis
       BROADCAST_CONNECTION: reverb
+      REVERB_APP_ID: ${REVERB_APP_ID:-shot-creative}
+      REVERB_APP_KEY: ${REVERB_APP_KEY:-shot-creative-key}
+      REVERB_APP_SECRET: ${REVERB_APP_SECRET:-shot-creative-secret}
+      REVERB_HOST: reverb
+      REVERB_PORT: 8080
+      REVERB_SCHEME: http
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
       AWS_DEFAULT_REGION: us-east-1
@@ -159,3 +167,4 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
+  frontend_node_modules:

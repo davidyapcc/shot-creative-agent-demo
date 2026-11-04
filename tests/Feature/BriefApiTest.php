@@ -9,6 +9,7 @@ use App\Enums\BriefState;
 use App\Enums\ShotState;
 use App\Jobs\PlanBriefJob;
 use App\Models\Brief;
+use App\Models\Judgement;
 use App\Models\Shot;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -94,6 +95,37 @@ class BriefApiTest extends TestCase
       ->assertJsonCount(2, 'data.brief.shots')
       ->assertJsonPath('data.brief.shots.0.sequence', 1)
       ->assertJsonPath('data.brief.shots.1.sequence', 2);
+  }
+
+  public function test_get_brief_includes_shot_judgements(): void
+  {
+    $brief = Brief::create([
+      'prompt' => '15s product teaser, rainy Tokyo, neon',
+      'state' => BriefState::Rendering,
+    ]);
+
+    $shot = Shot::create([
+      'brief_id' => $brief->id,
+      'sequence' => 1,
+      'prompt' => 'Shot 1: Neon sign reflecting on puddle',
+      'state' => ShotState::JudgingVideo,
+    ]);
+
+    Judgement::create([
+      'shot_id' => $shot->id,
+      'stage' => 'video',
+      'scores' => ['prompt_adherence' => 5],
+      'hard_fail_tags' => [],
+      'reason' => 'Perfect shot',
+      'verdict' => 'pass',
+    ]);
+
+    $response = $this->getJson("/briefs/{$brief->id}");
+
+    $response->assertStatus(200)
+      ->assertJsonCount(1, 'data.brief.shots.0.judgements')
+      ->assertJsonPath('data.brief.shots.0.judgements.0.verdict', 'pass')
+      ->assertJsonPath('data.brief.shots.0.judgements.0.reason', 'Perfect shot');
   }
 
   public function test_get_brief_returns_404_when_brief_does_not_exist(): void

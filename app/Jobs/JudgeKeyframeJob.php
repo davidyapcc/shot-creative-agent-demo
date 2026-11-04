@@ -6,6 +6,8 @@ namespace App\Jobs;
 
 use App\Contracts\JudgeInterface;
 use App\Enums\JudgementStage;
+use App\Events\JudgeVerdictRecorded;
+use App\Events\ShotUpdated;
 use App\Models\Judgement;
 use App\Models\Shot;
 use App\Traits\FailsBriefOnJobFailure;
@@ -43,6 +45,15 @@ class JudgeKeyframeJob implements ShouldQueue
     );
 
     Judgement::create($verdict->toModelAttributes($shot->id, JudgementStage::Image));
+
+    event(JudgeVerdictRecorded::fromVerdict(
+      $this->briefId,
+      $this->shotId,
+      JudgementStage::Image,
+      $verdict,
+    ));
+
+    ShotUpdated::dispatch($shot->refresh());
 
     if ($verdict->isFail())
     {
