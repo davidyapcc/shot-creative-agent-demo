@@ -6,13 +6,13 @@ namespace App\Jobs;
 
 use App\Contracts\VideoProviderInterface;
 use App\Enums\ShotState;
-use App\Events\ShotUpdated;
-use App\Events\VideoProgressUpdated;
 use App\Models\Brief;
+use App\Services\ShotVideoSubmitter;
 use App\Traits\FailsBriefOnJobFailure;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Log;
 
 class RenderShotsJob implements ShouldQueue
 {
@@ -29,30 +29,29 @@ class RenderShotsJob implements ShouldQueue
   public function handle(VideoProviderInterface $videoProvider): void
   {
     $brief = Brief::with('shots')->findOrFail($this->briefId);
+    $submitter = app(ShotVideoSubmitter::class);
 
     $pollJobs = [];
 
     foreach ($brief->shots as $shot)
     {
-      if ($shot->state->canTransitionTo(ShotState::GeneratingVideo))
+      if (!$shot->state->canTransitionTo(ShotState::GeneratingVideo))
       {
-        $shot->transitionTo(ShotState::GeneratingVideo);
+        continue;
       }
 
-      $renderId = $videoProvider->submit($shot->prompt, (string) $shot->keyframe_path);
+      $poll = $submitter->submit($shot, $videoProvider);
 
-      $shot->update([
-        'metadata' => array_merge($shot->metadata ?? [], ['render_id' => $renderId]),
-      ]);
-
-      VideoProgressUpdated::dispatch($brief->id, $shot->id, 0);
-      ShotUpdated::dispatch($shot);
-
-      $pollJobs[] = new PollVideoRenderJob($shot->id, $renderId, $brief->id);
+      if ($poll !== null)
+      {
+        $pollJobs[] = $poll;
+      }
     }
 
     if (empty($pollJobs))
     {
+      $this->failWhenNoShotCanRender($brief);
+
       return;
     }
 
@@ -61,5 +60,25 @@ class RenderShotsJob implements ShouldQueue
       ->then(new AdvanceBriefToAudioCallback($brief->id))
       ->catch(new FailBriefOnBatchFailureCallback($brief->id))
       ->dispatch();
+  }
+
+  /**
+   * Every shot used up its image retries, so no batch will ever advance the
+   * brief. A budget stop is left to DegradedCompletion, which owns that path.
+   */
+  private function failWhenNoShotCanRender(Brief $brief): void
+  {
+    $brief->refresh();
+
+    if ($brief->metadata['budget_exhausted'] ?? false)
+    {
+      return;
+    }
+
+    Log::warning('No shot passed its keyframe; failing the brief.', [
+      'brief_id' => $brief->id,
+    ]);
+
+    $brief->failWithInFlightShots();
   }
 }

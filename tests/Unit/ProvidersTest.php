@@ -21,6 +21,7 @@ use App\Services\Providers\ReplayJudge;
 use App\Services\Providers\ReplayVideoProvider;
 use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
+use RuntimeException;
 use Tests\TestCase;
 
 class ProvidersTest extends TestCase
@@ -93,6 +94,47 @@ class ProvidersTest extends TestCase
     $videoVerdict = $judge->judgeVideo('videos/shot_1.mp4', 'A neon alley', 'cyberpunk');
     $this->assertSame(JudgementVerdict::Pass, $videoVerdict->verdict());
     $this->assertArrayHasKey('temporal_consistency', $videoVerdict->scores);
+  }
+
+  public function test_replay_judge_throws_when_its_fixture_is_missing(): void
+  {
+    // Arrange
+    $judge = new ReplayJudge('/nonexistent/judge.json');
+
+    // Assert
+    $this->expectException(RuntimeException::class);
+    $this->expectExceptionMessage('Replay judge fixture is missing');
+
+    // Act
+    $judge->judgeImage('keyframes/shot_1.png', 'Shot 1: neon alley');
+  }
+
+  public function test_replay_judge_throws_when_a_scripted_failure_is_malformed(): void
+  {
+    // Arrange
+    $path = tempnam(sys_get_temp_dir(), 'judge');
+    file_put_contents($path, json_encode([
+      'video' => [
+        'fail_when_prompt_starts_with' => 'Shot 2:',
+        'pass_when_prompt_contains' => 'Simplify only this failure',
+        'failure' => ['reason' => 'No scores or tags.'],
+      ],
+    ]));
+    $judge = new ReplayJudge($path);
+
+    // Assert
+    $this->expectException(RuntimeException::class);
+    $this->expectExceptionMessage('malformed [video] entry');
+
+    // Act
+    try
+    {
+      $judge->judgeVideo('videos/shot_2.mp4', 'Shot 2: neon sign');
+    }
+    finally
+    {
+      unlink($path);
+    }
   }
 
   public function test_judgement_result_fails_on_low_score_or_hard_fail_tag(): void

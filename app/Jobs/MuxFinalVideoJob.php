@@ -49,17 +49,39 @@ class MuxFinalVideoJob implements ShouldQueue
       return;
     }
 
+    $exhausted = (bool) ($brief->metadata['budget_exhausted'] ?? false);
     $clips = $this->passingClips($brief);
-    [$voiceover, $soundEffect] = $this->audioTracks($brief);
 
-    $mp4 = $this->mux($clips, $voiceover, $soundEffect);
+    if ($exhausted && !$this->hasAudio($brief))
+    {
+      $mp4 = $this->muxVideoOnly($clips);
+    }
+    else
+    {
+      [$voiceover, $soundEffect] = $this->audioTracks($brief);
+      $mp4 = $this->mux($clips, $voiceover, $soundEffect);
+    }
+
     $finalPath = "final/brief_{$brief->id}_final.mp4";
 
     Storage::disk('s3')->put($finalPath, $mp4);
     $brief->update([
       'final_video_path' => $finalPath,
     ]);
-    $brief->transitionTo(BriefState::Done);
+    $brief->refresh();
+    $brief->transitionTo(
+      ($brief->metadata['budget_exhausted'] ?? false) ? BriefState::Degraded : BriefState::Done,
+    );
+  }
+
+  private function hasAudio(Brief $brief): bool
+  {
+    $soundEffectPath = $brief->metadata['sound_effect_path'] ?? null;
+
+    return is_string($brief->audio_path)
+      && $brief->audio_path !== ''
+      && is_string($soundEffectPath)
+      && $soundEffectPath !== '';
   }
 
   /**
@@ -97,6 +119,53 @@ class MuxFinalVideoJob implements ShouldQueue
     return [
       $this->readObject($voiceoverPath, 'Brief voiceover is missing from storage.'),
       $this->readObject($soundEffectPath, 'Brief sound effect is missing from storage.'),
+    ];
+  }
+
+  /**
+   * @param list<string> $clips
+   */
+  private function muxVideoOnly(array $clips): string
+  {
+    $directory = $this->makeWorkspace();
+
+    try
+    {
+      $clipPaths = array_map(
+        fn (int $index, string $bytes): string => $this->writeFile($directory, "clip_{$index}.mp4", $bytes),
+        array_keys($clips),
+        $clips,
+      );
+      $outputPath = $directory . '/final.mp4';
+      $this->runFfmpeg($this->buildVideoCommand($clipPaths, $outputPath), $outputPath);
+
+      return $this->readOutput($outputPath);
+    }
+    finally
+    {
+      $this->deleteWorkspace($directory);
+    }
+  }
+
+  /**
+   * @param list<string> $clipPaths
+   * @return list<string>
+   */
+  private function buildVideoCommand(array $clipPaths, string $outputPath): array
+  {
+    $inputs = array_merge(...array_map(fn (string $path): array => ['-i', $path], $clipPaths));
+    $clipCount = count($clipPaths);
+    $videoLabels = implode('', array_map(fn (int $index): string => "[{$index}:v]", array_keys($clipPaths)));
+
+    return [
+      'ffmpeg', '-y',
+      ...$inputs,
+      '-filter_complex', "{$videoLabels}concat=n={$clipCount}:v=1:a=0[v]",
+      '-map', '[v]',
+      '-c:v', self::VIDEO_CODEC,
+      '-pix_fmt', self::PIXEL_FORMAT,
+      '-an',
+      $outputPath,
     ];
   }
 

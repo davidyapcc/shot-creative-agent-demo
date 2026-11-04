@@ -38,6 +38,38 @@ class MockAgentTest extends TestCase
     $this->assertStringContainsString('Tokyo', $styleAnchor);
   }
 
+  public function test_mock_rewrite_keeps_the_scene_and_does_not_repeat_a_failed_fix(): void
+  {
+    $agent = new MockAgent();
+    $scene = 'Shot 1: Wide establishing shot setting the scene. rainy Tokyo';
+
+    $first = $agent->rewritePrompt([
+      'brief' => 'rainy Tokyo',
+      'original_prompt' => $scene,
+      'failed_scores' => ['anatomy' => 2],
+      'reason' => 'Left hand has six fingers.',
+      'previous_attempts' => [],
+    ]);
+
+    $this->assertStringStartsWith($scene, $first);
+    $this->assertStringContainsString('Simplify only this failure', $first);
+    $this->assertStringContainsString('Left hand has six fingers.', $first);
+
+    $second = $agent->rewritePrompt([
+      'brief' => 'rainy Tokyo',
+      'original_prompt' => $first,
+      'failed_scores' => ['anatomy' => 2],
+      'reason' => 'Left hand has six fingers.',
+      'previous_attempts' => [
+        ['prompt' => $scene, 'reason' => 'Left hand has six fingers.'],
+      ],
+    ]);
+
+    $this->assertStringStartsWith($scene, $second);
+    $this->assertStringContainsString('different simplification', $second);
+    $this->assertSame(1, substr_count($second, 'Simplify only this failure'));
+  }
+
   public function test_unsupported_agent_provider_throws_invalid_argument_exception(): void
   {
     config(['creative.agent.provider' => 'invalid_provider']);

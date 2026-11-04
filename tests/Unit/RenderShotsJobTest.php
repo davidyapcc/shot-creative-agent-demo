@@ -74,6 +74,62 @@ class RenderShotsJobTest extends TestCase
     });
   }
 
+  public function test_render_shots_job_fails_the_brief_when_every_shot_failed_its_image_step(): void
+  {
+    // Arrange
+    Bus::fake([GenerateAudioJob::class]);
+
+    $brief = Brief::create([
+      'prompt' => '15s product teaser',
+      'state' => BriefState::Rendering,
+    ]);
+
+    foreach ([1, 2] as $sequence)
+    {
+      Shot::create([
+        'brief_id' => $brief->id,
+        'sequence' => $sequence,
+        'prompt' => "Shot {$sequence} prompt",
+        'state' => ShotState::Failed,
+      ]);
+    }
+
+    $videoProvider = $this->createMock(VideoProviderInterface::class);
+    $videoProvider->expects($this->never())->method('submit');
+
+    // Act
+    (new RenderShotsJob($brief->id))->handle($videoProvider);
+
+    // Assert
+    $this->assertSame(BriefState::Failed, $brief->refresh()->state);
+    Bus::assertNothingBatched();
+  }
+
+  public function test_render_shots_job_leaves_a_budget_exhausted_brief_to_degraded_completion(): void
+  {
+    // Arrange
+    $brief = Brief::create([
+      'prompt' => '15s product teaser',
+      'state' => BriefState::Degraded,
+      'metadata' => ['budget_exhausted' => true],
+    ]);
+
+    Shot::create([
+      'brief_id' => $brief->id,
+      'sequence' => 1,
+      'prompt' => 'Shot 1 prompt',
+      'state' => ShotState::Failed,
+    ]);
+
+    $videoProvider = $this->createMock(VideoProviderInterface::class);
+
+    // Act
+    (new RenderShotsJob($brief->id))->handle($videoProvider);
+
+    // Assert
+    $this->assertSame(BriefState::Degraded, $brief->refresh()->state);
+  }
+
   public function test_advance_brief_to_audio_transitions_brief_and_dispatches_audio(): void
   {
     Queue::fake([GenerateAudioJob::class]);
@@ -83,6 +139,14 @@ class RenderShotsJobTest extends TestCase
       'state' => BriefState::Rendering,
     ]);
 
+    Shot::create([
+      'brief_id' => $brief->id,
+      'sequence' => 1,
+      'prompt' => 'Shot 1',
+      'state' => ShotState::Done,
+      'video_path' => 'videos/shot_1.mp4',
+    ]);
+
     $callback = new AdvanceBriefToAudioCallback($brief->id);
     $batch = $this->createMock(Batch::class);
 
@@ -90,6 +154,32 @@ class RenderShotsJobTest extends TestCase
 
     $this->assertSame(BriefState::Audio, $brief->refresh()->state);
     Queue::assertPushed(GenerateAudioJob::class, fn (GenerateAudioJob $j) => $j->briefId === $brief->id);
+  }
+
+  public function test_advance_brief_to_audio_fails_the_brief_instead_of_paying_for_audio_when_no_clip_passed(): void
+  {
+    // Arrange
+    Queue::fake([GenerateAudioJob::class]);
+
+    $brief = Brief::create([
+      'prompt' => '15s product teaser',
+      'state' => BriefState::Rendering,
+    ]);
+
+    Shot::create([
+      'brief_id' => $brief->id,
+      'sequence' => 1,
+      'prompt' => 'Shot 1',
+      'state' => ShotState::Failed,
+      'video_path' => 'videos/shot_1.mp4',
+    ]);
+
+    // Act
+    (new AdvanceBriefToAudioCallback($brief->id))($this->createMock(Batch::class));
+
+    // Assert
+    $this->assertSame(BriefState::Failed, $brief->refresh()->state);
+    Queue::assertNotPushed(GenerateAudioJob::class);
   }
 
   public function test_advance_brief_to_audio_skips_when_brief_not_in_rendering(): void

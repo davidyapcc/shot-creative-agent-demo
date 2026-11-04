@@ -40,7 +40,7 @@ class JudgeVerdictRecorded implements ShouldBroadcastNow
       briefId: $briefId,
       shotId: $shotId,
       stage: $stage,
-      verdict: $verdict->verdict,
+      verdict: $verdict->verdict(),
       hardFailTags: $verdict->hardFailTags,
       reason: $verdict->reason,
     );

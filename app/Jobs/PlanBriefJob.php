@@ -10,6 +10,7 @@ use App\Enums\ShotState;
 use App\Events\ShotUpdated;
 use App\Models\Brief;
 use App\Models\Shot;
+use App\Services\Budget;
 use App\Traits\FailsBriefOnJobFailure;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -25,16 +26,26 @@ class PlanBriefJob implements ShouldQueue
   {
   }
 
-  public function handle(AgentInterface $agent): void
+  public function handle(AgentInterface $agent, Budget $budget): void
   {
     $brief = Brief::findOrFail($this->briefId);
 
     $brief->transitionTo(BriefState::Planning);
 
+    if (!$budget->chargeOrDegrade($brief, 'agent', 'generateStyleAnchor'))
+    {
+      return;
+    }
+
     $styleAnchor = $agent->generateStyleAnchor($brief->prompt);
     $brief->update([
       'style_anchor' => $styleAnchor,
     ]);
+
+    if (!$budget->chargeOrDegrade($brief, 'agent', 'planShots'))
+    {
+      return;
+    }
 
     $plannedShots = $agent->planShots($brief->prompt);
 

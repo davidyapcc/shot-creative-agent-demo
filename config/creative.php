@@ -16,4 +16,5 @@ return [
   'audio' => env('AUDIO_PROVIDER', 'replay'),
   'audio_requests_per_minute' => (int) env('AUDIO_REQUESTS_PER_MINUTE', 10),
   'replay_pending_polls' => (int) env('REPLAY_PENDING_POLLS', 1),
+  'budget_cap' => (int) env('BUDGET_CAP', 100),
 ];

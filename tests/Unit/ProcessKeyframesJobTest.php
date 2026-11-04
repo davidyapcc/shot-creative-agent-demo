@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit;
 
+use App\Contracts\AgentInterface;
 use App\Contracts\ImageProviderInterface;
 use App\Contracts\JudgeInterface;
 use App\DTOs\JudgementResult;
@@ -116,7 +117,7 @@ class ProcessKeyframesJobTest extends TestCase
     $job = new JudgeKeyframeJob($shot->id, $brief->id);
     $this->assertSame('judge', $job->queue);
 
-    $job->handle($judge);
+    $job->handle($judge, app(AgentInterface::class));
 
     $judgement = Judgement::where('shot_id', $shot->id)->first();
     $this->assertNotNull($judgement);
@@ -124,8 +125,10 @@ class ProcessKeyframesJobTest extends TestCase
     $this->assertSame('pass', $judgement->verdict);
   }
 
-  public function test_judge_keyframe_job_fails_brief_and_shots_on_verdict_fail(): void
+  public function test_judge_keyframe_job_does_not_fail_the_brief_on_the_first_verdict_fail(): void
   {
+    Bus::fake();
+
     $brief = Brief::create([
       'prompt' => '15s product teaser',
       'state' => BriefState::Keyframes,
@@ -155,10 +158,10 @@ class ProcessKeyframesJobTest extends TestCase
       ));
 
     $job = new JudgeKeyframeJob($shot->id, $brief->id);
-    $job->handle($failingJudge);
+    $job->handle($failingJudge, app(AgentInterface::class));
 
-    $this->assertSame(ShotState::Failed, $shot->refresh()->state);
-    $this->assertSame(BriefState::Failed, $brief->refresh()->state);
+    $this->assertSame(ShotState::JudgingImage, $shot->refresh()->state);
+    $this->assertSame(BriefState::Keyframes, $brief->refresh()->state);
   }
 
   public function test_advance_brief_to_rendering_callback_transitions_and_dispatches(): void

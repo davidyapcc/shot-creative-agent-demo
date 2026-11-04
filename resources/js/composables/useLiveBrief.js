@@ -194,6 +194,7 @@ export function useLiveBrief()
 
     shotVideoProgress.value = progressForShots(applied);
     shots.value = applied;
+    refreshRegenerating(applied);
 
     return applied;
   }
@@ -325,6 +326,17 @@ export function useLiveBrief()
       BroadcastEvent.SHOT_UPDATED,
       `Shot #${updatedShot.sequence} state is ${updatedShot.state}`,
       { state: updatedShot.state, shotId: updatedShot.id },
+    );
+    refreshRegenerating(shots.value);
+  }
+
+  function refreshRegenerating(shotList)
+  {
+    isRegenerating.value = shotList.some((shot) =>
+      Number(shot.attempts) > 1 && (
+        shot.state === ShotState.GENERATING_IMAGE
+        || shot.state === ShotState.GENERATING_VIDEO
+      )
     );
   }
 

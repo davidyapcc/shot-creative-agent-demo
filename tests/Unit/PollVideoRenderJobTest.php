@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit;
 
+use App\Contracts\AgentInterface;
 use App\Contracts\JudgeInterface;
 use App\Contracts\VideoProviderInterface;
 use App\DTOs\JudgementResult;
@@ -23,6 +24,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
@@ -308,7 +310,7 @@ class PollVideoRenderJobTest extends TestCase
       ));
 
     $job = new JudgeVideoJob($shot->id, $brief->id);
-    $job->handle($judge);
+    $job->handle($judge, app(AgentInterface::class));
 
     $this->assertSame(ShotState::Done, $shot->refresh()->state);
 
@@ -319,8 +321,10 @@ class PollVideoRenderJobTest extends TestCase
     $this->assertArrayHasKey('temporal_consistency', $judgement->scores);
   }
 
-  public function test_judge_video_job_fails_brief_and_shots_on_verdict_fail(): void
+  public function test_judge_video_job_does_not_fail_the_brief_on_the_first_verdict_fail(): void
   {
+    Bus::fake();
+
     $brief = Brief::create([
       'prompt' => '15s product teaser',
       'state' => BriefState::Rendering,
@@ -351,10 +355,10 @@ class PollVideoRenderJobTest extends TestCase
       ));
 
     $job = new JudgeVideoJob($shot->id, $brief->id);
-    $job->handle($failingJudge);
+    $job->handle($failingJudge, app(AgentInterface::class));
 
-    $this->assertSame(ShotState::Failed, $shot->refresh()->state);
-    $this->assertSame(BriefState::Failed, $brief->refresh()->state);
+    $this->assertSame(ShotState::GeneratingVideo, $shot->refresh()->state);
+    $this->assertSame(BriefState::Rendering, $brief->refresh()->state);
   }
 
   public function test_advance_brief_to_audio_callback_ignores_cancelled_batch(): void

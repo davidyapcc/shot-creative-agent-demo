@@ -9,6 +9,7 @@ use App\Enums\ShotState;
 use App\Events\ShotUpdated;
 use App\Events\VideoProgressUpdated;
 use App\Models\Shot;
+use App\Services\Budget;
 use App\Traits\FailsBriefOnJobFailure;
 use DateTimeInterface;
 use Illuminate\Bus\Batchable;
@@ -68,6 +69,18 @@ class PollVideoRenderJob implements ShouldQueue
       return;
     }
 
+    $shot = Shot::with('brief')->find($this->shotId);
+
+    if ($shot === null || $shot->state === ShotState::Failed || ($shot->brief?->metadata['budget_exhausted'] ?? false))
+    {
+      return;
+    }
+
+    if ($shot->brief !== null && !app(Budget::class)->chargeOrDegrade($shot->brief, 'video', 'poll'))
+    {
+      return;
+    }
+
     $result = $videoProvider->poll($this->renderId);
 
     if ($result->isPending())
@@ -103,7 +116,10 @@ class PollVideoRenderJob implements ShouldQueue
       'video_path' => $videoPath,
     ]);
 
-    $shot->transitionTo(ShotState::JudgingVideo);
+    if (!$shot->advanceUnlessStopped(ShotState::JudgingVideo))
+    {
+      return;
+    }
 
     VideoProgressUpdated::dispatch($this->briefId, $this->shotId, self::COMPLETED_PROGRESS);
     ShotUpdated::dispatch($shot);

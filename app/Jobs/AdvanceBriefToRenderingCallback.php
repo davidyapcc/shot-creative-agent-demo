@@ -25,7 +25,7 @@ class AdvanceBriefToRenderingCallback
 
     $brief = Brief::find($this->briefId);
 
-    if ($brief !== null && $brief->state === BriefState::Keyframes)
+    if ($brief !== null && !($brief->metadata['budget_exhausted'] ?? false) && $brief->state === BriefState::Keyframes)
     {
       $brief->transitionTo(BriefState::Rendering);
       RenderShotsJob::dispatch($this->briefId);

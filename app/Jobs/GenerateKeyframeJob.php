@@ -8,6 +8,7 @@ use App\Contracts\ImageProviderInterface;
 use App\Enums\ShotState;
 use App\Events\ShotUpdated;
 use App\Models\Shot;
+use App\Services\Budget;
 use App\Traits\FailsBriefOnJobFailure;
 use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -36,8 +37,37 @@ class GenerateKeyframeJob implements ShouldQueue
     }
 
     $shot = Shot::with('brief')->findOrFail($this->shotId);
-    $shot->transitionTo(ShotState::GeneratingImage);
-    ShotUpdated::dispatch($shot);
+
+    if ($shot->state === ShotState::Failed || ($shot->brief?->metadata['budget_exhausted'] ?? false))
+    {
+      return;
+    }
+
+    if ($shot->brief !== null && !app(Budget::class)->chargeOrDegrade($shot->brief, 'image', 'generateImage'))
+    {
+      return;
+    }
+
+    $shot->refresh();
+
+    if ($shot->state === ShotState::Failed)
+    {
+      return;
+    }
+
+    $metadata = $shot->metadata ?? [];
+    $imageAttempts = (int) ($metadata['step_attempts']['image'] ?? 0) + 1;
+    $metadata['step_attempts']['image'] = $imageAttempts;
+    $shot->update([
+      'attempts' => (int) $shot->attempts + 1,
+      'metadata' => $metadata,
+    ]);
+
+    if ($shot->state->canTransitionTo(ShotState::GeneratingImage))
+    {
+      $shot->transitionTo(ShotState::GeneratingImage);
+      ShotUpdated::dispatch($shot);
+    }
 
     $imageBytes = $imageProvider->generateImage($shot->prompt, $shot->brief?->style_anchor);
     $keyframePath = "keyframes/brief_{$shot->brief_id}_shot_{$shot->id}.png";
@@ -48,7 +78,10 @@ class GenerateKeyframeJob implements ShouldQueue
       'keyframe_path' => $keyframePath,
     ]);
 
-    $shot->transitionTo(ShotState::JudgingImage);
+    if (!$shot->advanceUnlessStopped(ShotState::JudgingImage))
+    {
+      return;
+    }
 
     ShotUpdated::dispatch($shot);
   }
