@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Unit;
 
+use App\Contracts\AudioProviderInterface;
 use App\Contracts\ImageProviderInterface;
 use App\Contracts\JudgeInterface;
 use App\Contracts\VideoProviderInterface;
+use App\Services\Providers\ReplayAudioProvider;
 use Tests\TestCase;
 
 class CreativeConfigTest extends TestCase
@@ -64,6 +66,13 @@ class CreativeConfigTest extends TestCase
     $this->assertInstanceOf(ImageProviderInterface::class, app(ImageProviderInterface::class));
     $this->assertInstanceOf(VideoProviderInterface::class, app(VideoProviderInterface::class));
     $this->assertInstanceOf(JudgeInterface::class, app(JudgeInterface::class));
+  }
+
+  public function test_container_resolves_replay_audio_provider(): void
+  {
+    $audio = app(AudioProviderInterface::class);
+
+    $this->assertInstanceOf(ReplayAudioProvider::class, $audio);
   }
 
   /**

@@ -23,6 +23,18 @@ class HorizonQueueConfigTest extends TestCase
     $this->assertSame(['poll'], $defaults['supervisor-poll']['queue'] ?? []);
     $this->assertSame(['judge'], $defaults['supervisor-judge']['queue'] ?? []);
     $this->assertSame(['audio'], $defaults['supervisor-audio']['queue'] ?? []);
+    $this->assertAudioConcurrency($defaults['supervisor-audio']['maxProcesses'] ?? null);
+
+    $environments = $config['environments'] ?? [];
+    $this->assertAudioConcurrency($environments['production']['supervisor-audio']['maxProcesses'] ?? null);
+    $this->assertAudioConcurrency($environments['local']['supervisor-audio']['maxProcesses'] ?? null);
+  }
+
+  private function assertAudioConcurrency(mixed $processes): void
+  {
+    $this->assertIsInt($processes);
+    $this->assertGreaterThanOrEqual(1, $processes);
+    $this->assertLessThanOrEqual(2, $processes);
   }
 
   public function test_jobs_are_assigned_to_specified_queues(): void

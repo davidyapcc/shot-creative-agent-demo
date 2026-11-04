@@ -4,15 +4,18 @@ declare(strict_types=1);
 
 namespace Tests\Unit;
 
+use App\Contracts\AudioProviderInterface;
 use App\Contracts\ImageProviderInterface;
 use App\Contracts\JudgeInterface;
 use App\Contracts\VideoProviderInterface;
+use App\DTOs\AudioResult;
 use App\DTOs\JudgementResult;
 use App\DTOs\VideoRenderResult;
 use App\Enums\JudgementStage;
 use App\Enums\JudgementVerdict;
 use App\Enums\VideoRenderStatus;
 use App\Services\Providers\FfmpegMotionVideoProvider;
+use App\Services\Providers\ReplayAudioProvider;
 use App\Services\Providers\ReplayImageProvider;
 use App\Services\Providers\ReplayJudge;
 use App\Services\Providers\ReplayVideoProvider;
@@ -56,6 +59,20 @@ class ProvidersTest extends TestCase
     $this->assertTrue($secondResult->isCompleted());
     $this->assertSame(VideoRenderStatus::Completed, $secondResult->status);
     $this->assertNotEmpty($secondResult->videoContent);
+  }
+
+  public function test_replay_audio_provider_produces_voiceover_and_one_sound_effect(): void
+  {
+    $provider = new ReplayAudioProvider();
+
+    $this->assertInstanceOf(AudioProviderInterface::class, $provider);
+
+    $audio = $provider->generate('15s product teaser, rainy Tokyo, neon', 'cinematic neon rain');
+
+    $this->assertInstanceOf(AudioResult::class, $audio);
+    $this->assertStringStartsWith('RIFF', $audio->voiceover);
+    $this->assertStringStartsWith('RIFF', $audio->soundEffect);
+    $this->assertNotSame($audio->voiceover, $audio->soundEffect);
   }
 
   public function test_replay_judge_returns_passing_rubric_shape(): void
