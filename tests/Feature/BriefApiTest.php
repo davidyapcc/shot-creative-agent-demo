@@ -147,7 +147,7 @@ class BriefApiTest extends TestCase
         $this->assertApiError($response, 429, 'too_many_requests');
     }
 
-    public function test_unexpected_error_returns_500_error_shape_without_leaking_details(): void
+    public function test_unexpected_planning_error_fails_the_brief_without_leaking_details(): void
     {
         $this->app->bind(AgentInterface::class, fn () => new class implements AgentInterface
         {
@@ -171,8 +171,14 @@ class BriefApiTest extends TestCase
             'prompt' => '15s product teaser, rainy Tokyo, neon',
         ]);
 
-        $this->assertApiError($response, 500, 'server_error');
+        // The planning job fails the brief itself. The response stays the accepted
+        // payload, so a provider error never leaks into the HTTP body.
+        $response->assertStatus(202)
+            ->assertJsonPath('success', true);
         $this->assertStringNotContainsString('secret provider failure', $response->getContent());
+
+        $brief = Brief::findOrFail($response->json('data.brief.id'));
+        $this->assertSame(BriefState::Failed, $brief->state);
     }
 
     private function assertApiError(TestResponse $response, int $status, string $code): void

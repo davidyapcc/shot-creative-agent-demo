@@ -43,4 +43,9 @@ return [
         'key' => env('OPENAI_API_KEY'),
     ],
 
+    'cloudflare' => [
+        'key' => env('CLOUDFLARE_API_TOKEN'),
+        'account_id' => env('CLOUDFLARE_ACCOUNT_ID'),
+    ],
+
 ];

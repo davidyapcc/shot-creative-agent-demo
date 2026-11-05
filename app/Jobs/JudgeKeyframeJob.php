@@ -48,6 +48,10 @@ class JudgeKeyframeJob implements ShouldQueue
 
         $shot = Shot::with('brief')->findOrFail($this->shotId);
 
+        if ($retry->resumePendingRewrite($shot, JudgementStage::Image, $this->batch())) {
+            return;
+        }
+
         if (! $budget->chargeShotStep($shot, 'judge', 'judgeImage')) {
             return;
         }

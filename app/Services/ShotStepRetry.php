@@ -8,9 +8,12 @@ use App\Contracts\AgentInterface;
 use App\Contracts\VideoProviderInterface;
 use App\DTOs\JudgementResult;
 use App\Enums\JudgementStage;
+use App\Enums\JudgementVerdict;
 use App\Enums\ShotState;
+use App\Exceptions\ProviderRateLimitedException;
 use App\Jobs\GenerateKeyframeJob;
 use App\Jobs\JudgeKeyframeJob;
+use App\Models\Judgement;
 use App\Models\Shot;
 use Illuminate\Bus\Batch;
 use Illuminate\Support\Facades\Bus;
@@ -24,7 +27,35 @@ class ShotStepRetry
         private readonly Budget $budget,
         private readonly ShotVideoSubmitter $submitter,
         private readonly VideoProviderInterface $videos,
+        private readonly RateLimitHitCounter $rateLimits,
     ) {}
+
+    /**
+     * Continue a rewrite the provider refused, without judging the shot again.
+     */
+    public function resumePendingRewrite(Shot $shot, JudgementStage $stage, ?Batch $batch = null): bool
+    {
+        $pending = $shot->metadata['pending_agent_rewrite'] ?? null;
+
+        if (! is_array($pending) || ($pending['stage'] ?? null) !== $stage->value) {
+            return false;
+        }
+
+        $judgement = Judgement::query()->find($pending['judgement_id'] ?? null);
+
+        if ($judgement === null) {
+            return false;
+        }
+
+        $this->afterFailure($shot, new JudgementResult(
+            scores: $judgement->scores,
+            hardFailTags: $judgement->hard_fail_tags,
+            reason: $judgement->reason,
+            verdict: JudgementVerdict::from($judgement->verdict),
+        ), $stage, $batch);
+
+        return true;
+    }
 
     public function afterFailure(
         Shot $shot,
@@ -46,7 +77,16 @@ class ShotStepRetry
             return;
         }
 
-        $this->rewriteAndLogAttempt($shot, $verdict, $metadata, $step);
+        try {
+            $this->rewriteAndLogAttempt($shot, $verdict, $metadata, $step);
+        } catch (ProviderRateLimitedException $exception) {
+            $this->budget->refundShotStep($shot, 'agent', 'rewritePrompt');
+            $this->rememberPendingRewrite($shot, $stage);
+            $this->rateLimits->increment('agent');
+
+            throw $exception;
+        }
+
         $this->retryStep($shot, $stage, $batch);
     }
 
@@ -75,13 +115,28 @@ class ShotStepRetry
      */
     private function chargeRewrite(Shot $shot): bool
     {
-        if ($shot->brief !== null && ! $this->budget->chargeOrDegrade($shot->brief, 'agent', 'rewritePrompt')) {
+        if ($shot->brief !== null && ! $this->budget->chargeOrDegrade($shot->brief, 'agent', 'rewritePrompt', $shot->id)) {
             return false;
         }
 
         $shot->refresh();
 
         return $shot->state !== ShotState::Failed;
+    }
+
+    private function rememberPendingRewrite(Shot $shot, JudgementStage $stage): void
+    {
+        $metadata = $shot->metadata ?? [];
+        $metadata['pending_agent_rewrite'] = [
+            'stage' => $stage->value,
+            'judgement_id' => Judgement::query()
+                ->where('shot_id', $shot->id)
+                ->where('stage', $stage->value)
+                ->latest('id')
+                ->value('id'),
+        ];
+
+        $shot->update(['metadata' => $metadata]);
     }
 
     /**
@@ -103,6 +158,7 @@ class ShotStepRetry
             'reason' => $verdict->reason,
         ];
         $metadata['prompt_attempts'][$step] = $log;
+        unset($metadata['pending_agent_rewrite']);
 
         $shot->update([
             'prompt' => $rewritten,

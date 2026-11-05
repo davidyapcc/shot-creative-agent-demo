@@ -11,7 +11,9 @@ use App\Contracts\JudgeInterface;
 use App\Contracts\VideoProviderInterface;
 use App\Jobs\GenerateAudioJob;
 use App\Jobs\JudgeKeyframeJob;
+use App\Jobs\PlanBriefJob;
 use App\Services\Agent\MockAgent;
+use App\Services\Agent\PrismAgent;
 use App\Services\Judge\JudgeHttp;
 use App\Services\Judge\JudgeMedia;
 use App\Services\Judge\JudgeRubric;
@@ -39,6 +41,9 @@ class AppServiceProvider extends ServiceProvider
 
             return match ($provider) {
                 'mock' => new MockAgent,
+                'gemini' => $this->prismAgent('gemini', 'services.gemini.key', 'GEMINI_API_KEY'),
+                'openai' => $this->prismAgent('openai', 'services.openai.key', 'OPENAI_API_KEY'),
+                'cloudflare' => $this->cloudflareAgent(),
                 default => throw new InvalidArgumentException("Unsupported agent provider [{$provider}]."),
             };
         });
@@ -83,6 +88,54 @@ class AppServiceProvider extends ServiceProvider
                 default => throw new InvalidArgumentException("Unsupported judge provider [{$provider}]."),
             };
         });
+    }
+
+    private function prismAgent(string $provider, string $configKey, string $envName, ?string $url = null): PrismAgent
+    {
+        return new PrismAgent(
+            provider: $provider,
+            model: $this->agentModel($provider),
+            apiKey: $this->agentKey($configKey, $envName, $provider),
+            url: $url,
+        );
+    }
+
+    private function cloudflareAgent(): PrismAgent
+    {
+        $accountId = config('services.cloudflare.account_id');
+
+        if (! is_string($accountId) || trim($accountId) === '') {
+            throw new InvalidArgumentException('CLOUDFLARE_ACCOUNT_ID is required when AGENT_PROVIDER=cloudflare.');
+        }
+
+        return $this->prismAgent(
+            'cloudflare',
+            'services.cloudflare.key',
+            'CLOUDFLARE_API_TOKEN',
+            'https://api.cloudflare.com/client/v4/accounts/'.rawurlencode(trim($accountId)).'/ai/v1',
+        );
+    }
+
+    private function agentModel(string $provider): string
+    {
+        $model = config('creative.agent.model');
+
+        if (! is_string($model) || trim($model) === '') {
+            throw new InvalidArgumentException("AGENT_MODEL is required when AGENT_PROVIDER={$provider}.");
+        }
+
+        return trim($model);
+    }
+
+    private function agentKey(string $configKey, string $envName, string $provider): string
+    {
+        $key = config($configKey);
+
+        if (! is_string($key) || trim($key) === '') {
+            throw new InvalidArgumentException("{$envName} is required when AGENT_PROVIDER={$provider}.");
+        }
+
+        return trim($key);
     }
 
     private function geminiJudge(): GeminiJudge
@@ -159,6 +212,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        RateLimiter::for(PlanBriefJob::RATE_LIMITER, function (): Limit {
+            return Limit::perMinute((int) config('creative.agent.requests_per_minute', 10));
+        });
+
         RateLimiter::for(GenerateAudioJob::RATE_LIMITER, function (): Limit {
             return Limit::perMinute((int) config('creative.audio_requests_per_minute', 10));
         });

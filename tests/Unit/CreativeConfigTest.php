@@ -35,6 +35,8 @@ class CreativeConfigTest extends TestCase
         $config = $this->loadCreativeConfig();
 
         $this->assertSame('mock', $config['agent']['provider']);
+        $this->assertSame('gemini-3.8-flash', $config['agent']['model']);
+        $this->assertSame(10, $config['agent']['requests_per_minute']);
         $this->assertSame('replay', $config['judge']['provider']);
         $this->assertSame('gemini-3.5-flash-lite', $config['judge']['gemini_model']);
         $this->assertSame('gpt-5.4-mini', $config['judge']['openai_model']);

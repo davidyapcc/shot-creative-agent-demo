@@ -6,6 +6,7 @@ return [
     'agent' => [
         'provider' => env('AGENT_PROVIDER', 'mock'),
         'model' => env('AGENT_MODEL', 'gemini-3.8-flash'),
+        'requests_per_minute' => (int) env('AGENT_REQUESTS_PER_MINUTE', 10),
     ],
     'judge' => [
         'provider' => env('JUDGE_PROVIDER', 'replay'),
