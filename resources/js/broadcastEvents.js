@@ -3,6 +3,7 @@ export const BroadcastEvent = Object.freeze({
   VIDEO_PROGRESS_UPDATED: 'VideoProgressUpdated',
   SHOT_UPDATED: 'ShotUpdated',
   JUDGE_VERDICT_RECORDED: 'JudgeVerdictRecorded',
+  TELEMETRY_UPDATED: 'TelemetryUpdated',
 });
 
 const IDENTITY_FIELDS = ['state', 'shotId', 'progress', 'verdict', 'stage'];

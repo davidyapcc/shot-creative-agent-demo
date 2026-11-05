@@ -79,6 +79,8 @@
 
         <!-- RIGHT COLUMN: Shot Cards & Final Assembly (7 cols on lg) -->
         <section class="lg:col-span-7 flex flex-col gap-6">
+          <QualityTelemetry :telemetry="telemetry" />
+
           <div class="flex items-center justify-between">
             <h2 class="text-sm font-semibold uppercase tracking-wider text-zinc-300 flex items-center gap-2">
               <span>Shot Cards</span>
@@ -124,10 +126,12 @@
 
 <script setup>
 import { useLiveBrief } from '../composables/useLiveBrief';
+import QualityTelemetry from './QualityTelemetry.vue';
 import ShotCard from './ShotCard.vue';
 import StageStream from './StageStream.vue';
 
 const {
+  telemetry,
   promptInput,
   isSubmitting,
   errorMessage,

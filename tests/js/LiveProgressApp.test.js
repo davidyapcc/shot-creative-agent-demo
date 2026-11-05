@@ -26,6 +26,39 @@ const mockEcho = {
   },
 };
 
+const EMPTY_TELEMETRY = {
+  pass_rate: null,
+  top_failure_tags: [],
+  retries_per_brief: null,
+  duration_p50_seconds: null,
+  duration_p95_seconds: null,
+  cost_units_per_brief: null,
+  queue_depth: 0,
+  failed_jobs: 0,
+  rate_limit_hits: 0,
+};
+
+function telemetryResponse(data = EMPTY_TELEMETRY)
+{
+  return Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve({ success: true, data }),
+  });
+}
+
+function mockFetch(impl)
+{
+  global.fetch = vi.fn((url, options) =>
+  {
+    if (url === '/telemetry')
+    {
+      return telemetryResponse();
+    }
+
+    return impl(url, options);
+  });
+}
+
 vi.mock('../../resources/js/echo', () => ({
   initEcho: vi.fn(() => mockEcho),
 }));
@@ -46,6 +79,8 @@ describe('LiveProgressApp', () =>
     {
       delete mockListeners[key];
     }
+
+    mockFetch(() => Promise.reject(new Error('Unknown endpoint')));
   });
 
   it('renders an empty brief form and a submit button', () =>
@@ -68,7 +103,7 @@ describe('LiveProgressApp', () =>
       shots: [],
     };
 
-    global.fetch = vi.fn((url, options) =>
+    mockFetch((url, options) =>
     {
       if (url === '/briefs' && options?.method === 'POST')
       {
@@ -270,7 +305,7 @@ describe('LiveProgressApp', () =>
       attempts: 1,
     };
 
-    global.fetch = vi.fn()
+    const briefFetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({
@@ -285,6 +320,7 @@ describe('LiveProgressApp', () =>
           data: { brief: { id: 55, state: 'audio', shots: [] } },
         }),
       });
+    mockFetch((url, options) => briefFetch(url, options));
 
     const wrapper = mount(LiveProgressApp);
     await flushPromises();
@@ -302,7 +338,7 @@ describe('LiveProgressApp', () =>
     window.history.replaceState({}, '', '/?brief_id=55');
 
     let resolveFetch;
-    global.fetch = vi.fn(() => new Promise((resolve) =>
+    mockFetch(() => new Promise((resolve) =>
     {
       resolveFetch = resolve;
     }));
@@ -348,7 +384,7 @@ describe('LiveProgressApp', () =>
     };
 
     let resolveSecondFetch;
-    global.fetch = vi.fn()
+    const briefFetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({
@@ -360,6 +396,7 @@ describe('LiveProgressApp', () =>
       {
         resolveSecondFetch = resolve;
       }));
+    mockFetch((url, options) => briefFetch(url, options));
 
     const wrapper = mount(LiveProgressApp);
     await flushPromises();
@@ -472,7 +509,7 @@ describe('LiveProgressApp', () =>
     let resolveFirst;
     let resolveSecond;
     let calls = 0;
-    global.fetch = vi.fn(() => new Promise((resolve) =>
+    mockFetch(() => new Promise((resolve) =>
     {
       calls += 1;
       if (calls === 1)
@@ -513,5 +550,93 @@ describe('LiveProgressApp', () =>
     await flushPromises();
 
     expect(wrapper.text()).not.toContain('Brief state is planning');
+  });
+
+  it('shows quality telemetry above the shot cards and updates it live', async () =>
+  {
+    const wrapper = mount(LiveProgressApp);
+    await flushPromises();
+
+    const quality = wrapper.get('[aria-label="Quality telemetry"]');
+    const columnChildren = [...quality.element.parentElement.children];
+    expect(columnChildren[0]).toBe(quality.element);
+    expect(columnChildren[1].textContent).toContain('Shot Cards');
+    expect(wrapper.get('[aria-label="Quality telemetry"]').text()).toContain('None');
+    expect(wrapper.get('[aria-label="Quality telemetry"]').text()).toContain('—');
+    expect(mockEcho.channel).toHaveBeenCalledWith('telemetry');
+    expect(global.fetch).toHaveBeenCalledWith('/telemetry', expect.any(Object));
+
+    mockListeners['.TelemetryUpdated']({
+      success: true,
+      data: {
+        pass_rate: 94,
+        top_failure_tags: [
+          { tag: 'anatomy', count: 2 },
+          { tag: 'flicker', count: 2 },
+        ],
+        retries_per_brief: 1.7,
+        duration_p50_seconds: 40,
+        duration_p95_seconds: 160,
+        cost_units_per_brief: 4.7,
+        queue_depth: 3,
+        failed_jobs: 1,
+        rate_limit_hits: 4,
+      },
+    });
+    await wrapper.vm.$nextTick();
+
+    const updated = wrapper.get('[aria-label="Quality telemetry"]').text();
+    expect(updated).toContain('94%');
+    expect(updated).toContain('anatomy');
+    expect(updated).toContain('flicker');
+    expect(updated).toContain('1.7');
+    expect(updated).toContain('40s');
+    expect(updated).toContain('160s');
+    expect(updated).toContain('4.7');
+    expect(updated).not.toContain('None');
+  });
+
+  it('keeps a telemetry event that arrives while the first load is open', async () =>
+  {
+    let resolveTelemetry;
+    global.fetch = vi.fn((url) =>
+    {
+      if (url === '/telemetry')
+      {
+        return new Promise((resolve) =>
+        {
+          resolveTelemetry = resolve;
+        });
+      }
+
+      return Promise.reject(new Error('Unknown endpoint'));
+    });
+
+    const wrapper = mount(LiveProgressApp);
+    await wrapper.vm.$nextTick();
+
+    mockListeners['.TelemetryUpdated']({
+      success: true,
+      data: {
+        pass_rate: 94,
+        top_failure_tags: [{ tag: 'anatomy', count: 2 }],
+        retries_per_brief: 1.7,
+        duration_p50_seconds: 40,
+        duration_p95_seconds: 160,
+        cost_units_per_brief: 4.7,
+        queue_depth: 3,
+        failed_jobs: 1,
+        rate_limit_hits: 4,
+      },
+    });
+    await wrapper.vm.$nextTick();
+
+    resolveTelemetry({
+      ok: true,
+      json: () => Promise.resolve({ success: true, data: EMPTY_TELEMETRY }),
+    });
+    await flushPromises();
+
+    expect(wrapper.get('[aria-label="Quality telemetry"]').text()).toContain('94%');
   });
 });

@@ -1,8 +1,9 @@
 import { computed, onMounted, ref } from 'vue';
-import { fetchBrief, postBrief } from '../briefApi';
+import { fetchBrief, fetchTelemetry, postBrief } from '../briefApi';
 import { BroadcastEvent } from '../broadcastEvents';
 import { BriefState, ShotState } from '../constants';
 import { failTagFor, failTagFrom, latestJudgement } from '../shotJudgement';
+import { emptyTelemetry, normalizeTelemetry } from '../telemetry';
 import { useBriefChannel } from './useBriefChannel';
 import { useStreamLog } from './useStreamLog';
 
@@ -32,10 +33,13 @@ export function useLiveBrief()
   let shotRevision = 0;
   let briefRevision = 0;
   let syncSerial = 0;
+  let telemetrySerial = 0;
   const shotRevisions = new Map();
 
   const { streamEvents, addStreamEvent, clearStream, seedStream } = useStreamLog();
-  const { subscribe } = useBriefChannel((error) =>
+  const telemetry = ref(emptyTelemetry());
+
+  const { subscribe, subscribeTelemetry } = useBriefChannel((error) =>
   {
     errorMessage.value = error.message;
   });
@@ -64,6 +68,15 @@ export function useLiveBrief()
 
   onMounted(() =>
   {
+    subscribeTelemetry({
+      [BroadcastEvent.TELEMETRY_UPDATED]: (payload) =>
+      {
+        telemetrySerial += 1;
+        telemetry.value = normalizeTelemetry(payload?.data);
+      },
+    });
+    loadTelemetry();
+
     const params = new URLSearchParams(window.location.search);
     const briefId = params.get('brief_id');
     if (!briefId)
@@ -378,7 +391,28 @@ export function useLiveBrief()
     shotRevisions.set(shotId, shotRevision);
   }
 
+  async function loadTelemetry()
+  {
+    const serial = ++telemetrySerial;
+
+    try
+    {
+      const next = normalizeTelemetry(await fetchTelemetry());
+      if (serial !== telemetrySerial)
+      {
+        return;
+      }
+
+      telemetry.value = next;
+    }
+    catch (error)
+    {
+      console.error('Failed to load quality telemetry', error);
+    }
+  }
+
   return {
+    telemetry,
     promptInput,
     isSubmitting,
     errorMessage,

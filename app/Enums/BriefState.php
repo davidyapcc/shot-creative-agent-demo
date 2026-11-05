@@ -31,4 +31,15 @@ enum BriefState: string
             self::Done, self::Degraded, self::Failed => false,
         };
     }
+
+    /**
+     * A brief in a terminal state has finished the pipeline.
+     */
+    public function isTerminal(): bool
+    {
+        return match ($this) {
+            self::Done, self::Degraded, self::Failed => true,
+            default => false,
+        };
+    }
 }
