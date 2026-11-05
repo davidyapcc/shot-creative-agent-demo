@@ -7,15 +7,11 @@ namespace App\Models;
 use App\Enums\BriefState;
 use App\Enums\ShotState;
 use App\Events\BriefStateChanged;
-use App\Events\TelemetryUpdated;
-use App\Services\Telemetry;
 use App\Traits\HasStateTransitions;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
-use Throwable;
 
 class Brief extends Model
 {
@@ -63,18 +59,27 @@ class Brief extends Model
             }
 
             BriefStateChanged::dispatch($brief->id, $brief->getOriginal('state'), $brief->state);
-
-            if ($brief->state->isTerminal()) {
-                try {
-                    TelemetryUpdated::dispatch(app(Telemetry::class)->snapshot());
-                } catch (Throwable $exception) {
-                    Log::warning('Telemetry snapshot failed after a brief finished.', [
-                        'brief_id' => $brief->id,
-                        'exception' => $exception->getMessage(),
-                    ]);
-                }
-            }
         });
+    }
+
+    /**
+     * Sum of ledger costs, or budget_used when the brief has no ledger.
+     */
+    public function costUnits(): float
+    {
+        $ledger = $this->metadata['budget_ledger'] ?? null;
+        if (! is_array($ledger)) {
+            return (float) $this->budget_used;
+        }
+
+        $sum = 0.0;
+        foreach ($ledger as $entry) {
+            if (is_array($entry)) {
+                $sum += (float) ($entry['cost'] ?? 0);
+            }
+        }
+
+        return $sum;
     }
 
     public function shots(): HasMany

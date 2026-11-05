@@ -130,6 +130,23 @@ class TelemetryApiTest extends TestCase
         $this->assertEqualsWithDelta(1.7, (float) $response->json('data.retries_per_brief'), 0.001);
     }
 
+    public function test_a_failed_video_attempt_without_a_clip_is_not_counted_as_a_retry(): void
+    {
+        $this->horizonMasters([]);
+
+        $brief = $this->completedBrief(BriefState::Done, 10);
+        $this->shot($brief, 1, [
+            'state' => ShotState::Failed,
+            'attempts' => 2,
+            'keyframe_path' => 'keyframes/a.png',
+        ]);
+
+        $response = $this->getJson('/telemetry');
+
+        $response->assertOk();
+        $this->assertEqualsWithDelta(0, (float) $response->json('data.retries_per_brief'), 0.001);
+    }
+
     public function test_duration_percentiles_use_nearest_rank_over_done_and_degraded_briefs(): void
     {
         $this->horizonMasters([]);
@@ -255,6 +272,25 @@ class TelemetryApiTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('data.queue_depth', 15)
             ->assertJsonPath('data.failed_jobs', 7);
+    }
+
+    public function test_queue_depth_uses_the_driver_when_horizon_has_no_workload(): void
+    {
+        $this->horizonMasters([(object) ['status' => 'running']]);
+        $this->mock(WorkloadRepository::class, function ($mock): void {
+            $mock->shouldReceive('get')->andReturn([]);
+        });
+        $this->mock(JobRepository::class, function ($mock): void {
+            $mock->shouldReceive('countFailed')->andReturn(0);
+        });
+        Queue::fake();
+        Queue::pushOn('poll', new PlanBriefJob(1));
+        Queue::pushOn('audio', new PlanBriefJob(1));
+
+        $response = $this->getJson('/telemetry');
+
+        $response->assertOk()
+            ->assertJsonPath('data.queue_depth', 2);
     }
 
     public function test_failed_jobs_fall_back_to_the_table_when_horizon_cannot_count_them(): void

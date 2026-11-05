@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 import LiveProgressApp from '../../resources/js/components/LiveProgressApp.vue';
 import { initEcho } from '../../resources/js/echo';
+import { emptyTelemetry } from '../../resources/js/telemetry';
 
 // Mock Echo
 const mockListeners = {};
@@ -26,19 +27,7 @@ const mockEcho = {
   },
 };
 
-const EMPTY_TELEMETRY = {
-  pass_rate: null,
-  top_failure_tags: [],
-  retries_per_brief: null,
-  duration_p50_seconds: null,
-  duration_p95_seconds: null,
-  cost_units_per_brief: null,
-  queue_depth: 0,
-  failed_jobs: 0,
-  rate_limit_hits: 0,
-};
-
-function telemetryResponse(data = EMPTY_TELEMETRY)
+function telemetryResponse(data = emptyTelemetry())
 {
   return Promise.resolve({
     ok: true,
@@ -633,7 +622,7 @@ describe('LiveProgressApp', () =>
 
     resolveTelemetry({
       ok: true,
-      json: () => Promise.resolve({ success: true, data: EMPTY_TELEMETRY }),
+      json: () => Promise.resolve({ success: true, data: emptyTelemetry() }),
     });
     await flushPromises();
 

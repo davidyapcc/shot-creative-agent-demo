@@ -9,9 +9,11 @@ use App\Contracts\AudioProviderInterface;
 use App\Contracts\ImageProviderInterface;
 use App\Contracts\JudgeInterface;
 use App\Contracts\VideoProviderInterface;
+use App\Events\BriefStateChanged;
 use App\Jobs\GenerateAudioJob;
 use App\Jobs\JudgeKeyframeJob;
 use App\Jobs\PlanBriefJob;
+use App\Listeners\BroadcastFinishedBriefTelemetry;
 use App\Services\Agent\MockAgent;
 use App\Services\Agent\PrismAgent;
 use App\Services\Judge\JudgeHttp;
@@ -25,6 +27,7 @@ use App\Services\Providers\ReplayImageProvider;
 use App\Services\Providers\ReplayJudge;
 use App\Services\Providers\ReplayVideoProvider;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use InvalidArgumentException;
@@ -216,6 +219,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Event::listen(BriefStateChanged::class, BroadcastFinishedBriefTelemetry::class);
+
         RateLimiter::for(PlanBriefJob::RATE_LIMITER, function (): Limit {
             return Limit::perMinute((int) config('creative.agent.requests_per_minute'));
         });

@@ -38,22 +38,15 @@ export function useBriefChannel(reportError)
 
   function subscribe(briefId, handlers)
   {
-    if (!echo)
-    {
-      setupEcho();
-    }
-
-    if (!echo)
-    {
-      return;
-    }
-
-    stopBriefChannel(activeChannel);
-    activeChannel = echo.channel(`briefs.${briefId}`);
-    listenToBriefChannel(activeChannel, handlers);
+    activeChannel = listen(`briefs.${briefId}`, handlers, activeChannel);
   }
 
   function subscribeTelemetry(handlers)
+  {
+    telemetryChannel = listen('telemetry', handlers, telemetryChannel);
+  }
+
+  function listen(name, handlers, current)
   {
     if (!echo)
     {
@@ -62,12 +55,14 @@ export function useBriefChannel(reportError)
 
     if (!echo)
     {
-      return;
+      return current;
     }
 
-    stopBriefChannel(telemetryChannel);
-    telemetryChannel = echo.channel('telemetry');
-    listenToBriefChannel(telemetryChannel, handlers);
+    stopBriefChannel(current);
+    const channel = echo.channel(name);
+    listenToBriefChannel(channel, handlers);
+
+    return channel;
   }
 
   return { subscribe, subscribeTelemetry };

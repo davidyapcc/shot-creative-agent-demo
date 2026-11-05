@@ -5,10 +5,9 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Enums\BriefState;
-use App\Enums\ShotState;
+use App\Enums\JudgementVerdict;
 use App\Models\Brief;
 use App\Models\Judgement;
-use App\Models\Shot;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -19,7 +18,10 @@ use Throwable;
 
 class Telemetry
 {
-    private const WINDOW = 50;
+    /**
+     * Latest judgements, and latest finished briefs, included in each metric.
+     */
+    private const LATEST_SAMPLE = 50;
 
     /**
      * Pipeline queues from config/horizon.php. Other queues are ops noise.
@@ -69,7 +71,7 @@ class Telemetry
     {
         return Judgement::query()
             ->orderByDesc('id')
-            ->limit(self::WINDOW)
+            ->limit(self::LATEST_SAMPLE)
             ->get();
     }
 
@@ -84,7 +86,7 @@ class Telemetry
             ->whereNotNull('completed_at')
             ->orderByDesc('completed_at')
             ->orderByDesc('id')
-            ->limit(self::WINDOW)
+            ->limit(self::LATEST_SAMPLE)
             ->get();
     }
 
@@ -97,7 +99,7 @@ class Telemetry
             return null;
         }
 
-        $passes = $judgements->where('verdict', 'pass')->count();
+        $passes = $judgements->where('verdict', JudgementVerdict::Pass->value)->count();
 
         return round($passes / $judgements->count() * 100, 1);
     }
@@ -111,7 +113,7 @@ class Telemetry
         $counts = [];
 
         foreach ($judgements as $judgement) {
-            if ($judgement->verdict !== 'fail') {
+            if ($judgement->verdict !== JudgementVerdict::Fail->value) {
                 continue;
             }
 
@@ -152,50 +154,11 @@ class Telemetry
         $retries = 0;
         foreach ($briefs as $brief) {
             foreach ($brief->shots as $shot) {
-                $retries += $this->retriesFor($shot);
+                $retries += $shot->generationRetries();
             }
         }
 
         return round($retries / $briefs->count(), 1);
-    }
-
-    /**
-     * Retries are generations after the first of each stage. Without
-     * step_attempts, subtract the image and video stages the shot reached.
-     */
-    private function retriesFor(Shot $shot): int
-    {
-        $steps = $shot->metadata['step_attempts'] ?? null;
-        if (is_array($steps)) {
-            $image = (int) ($steps['image'] ?? 0);
-            $video = (int) ($steps['video'] ?? 0);
-
-            return max(0, $image - 1) + max(0, $video - 1);
-        }
-
-        return max(0, (int) $shot->attempts - $this->stagesReached($shot));
-    }
-
-    private function stagesReached(Shot $shot): int
-    {
-        $image = filled($shot->keyframe_path) || in_array($shot->state, [
-            ShotState::JudgingImage,
-            ShotState::GeneratingVideo,
-            ShotState::JudgingVideo,
-            ShotState::Done,
-        ], true);
-
-        $video = filled($shot->video_path) || in_array($shot->state, [
-            ShotState::GeneratingVideo,
-            ShotState::JudgingVideo,
-            ShotState::Done,
-        ], true);
-
-        if (! $image && ! $video && (int) $shot->attempts > 0) {
-            return 1;
-        }
-
-        return (int) $image + (int) $video;
     }
 
     /**
@@ -231,27 +194,10 @@ class Telemetry
 
         $total = 0.0;
         foreach ($briefs as $brief) {
-            $total += $this->costUnits($brief);
+            $total += $brief->costUnits();
         }
 
         return round($total / $briefs->count(), 1);
-    }
-
-    private function costUnits(Brief $brief): float
-    {
-        $ledger = $brief->metadata['budget_ledger'] ?? null;
-        if (! is_array($ledger)) {
-            return (float) $brief->budget_used;
-        }
-
-        $sum = 0.0;
-        foreach ($ledger as $entry) {
-            if (is_array($entry)) {
-                $sum += (float) ($entry['cost'] ?? 0);
-            }
-        }
-
-        return $sum;
     }
 
     private function horizonIsUp(): bool
@@ -267,7 +213,10 @@ class Telemetry
     {
         if ($horizon) {
             try {
-                return $this->horizonQueueDepth();
+                $workload = app(WorkloadRepository::class)->get();
+                if ($workload !== []) {
+                    return $this->depthFromWorkload($workload);
+                }
             } catch (Throwable) {
                 // Horizon's workload read failed. Use the queue driver.
             }
@@ -281,10 +230,13 @@ class Telemetry
         return $depth;
     }
 
-    private function horizonQueueDepth(): int
+    /**
+     * @param  array<int, array<string, mixed>>  $workload
+     */
+    private function depthFromWorkload(array $workload): int
     {
         $depth = 0;
-        foreach (app(WorkloadRepository::class)->get() as $queue) {
+        foreach ($workload as $queue) {
             $name = $queue['name'] ?? '';
             if (! in_array($name, self::QUEUES, true)) {
                 continue;
