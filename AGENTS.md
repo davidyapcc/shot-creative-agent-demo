@@ -1,15 +1,5 @@
 # Agent instructions
 
-## Agent skills
-
-### Issue tracker
-
-Issues are tracked in this repo's GitHub Issues (davidyapcc/shot-creative-agent-demo) via the `gh` CLI. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+- **Issues** — GitHub Issues on davidyapcc/shot-creative-agent-demo, via `gh`. Before you create, read, label or close an issue, read `docs/agents/issue-tracker.md`.
+- **Triage labels** — `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. Each skill role name is also the label string.
+- **Domain vocabulary** — before you name a domain concept or change an area with a past decision behind it, read `docs/agents/domain.md`.
