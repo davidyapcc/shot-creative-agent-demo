@@ -1,6 +1,7 @@
 # Agent instructions
 
 - **Issues** — GitHub Issues on davidyapcc/shot-creative-agent-demo, via `gh`. Before you create, read, label or close an issue, read `docs/agents/issue-tracker.md`.
+- **Branch per issue** — before the first edit for an issue, cut a fresh branch from an up-to-date `main`, named `<type>/<short-slug>` with the commit types (`feat/gemini-openai-judges`). One issue per branch.
 - **Triage labels** — `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. Each skill role name is also the label string.
 - **Domain vocabulary** — before you name a domain concept or change an area with a past decision behind it, read `docs/agents/domain.md`.
 - **Spec** — `Brief → Shot Creative Agent Demo Spec v2.md` is the current spec; the unsuffixed file is the earlier draft.
