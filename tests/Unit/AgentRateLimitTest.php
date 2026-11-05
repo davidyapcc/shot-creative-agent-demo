@@ -10,6 +10,7 @@ use App\DTOs\JudgementResult;
 use App\Enums\BriefState;
 use App\Enums\JudgementVerdict;
 use App\Enums\ShotState;
+use App\Events\ShotUpdated;
 use App\Exceptions\ProviderRateLimitedException;
 use App\Jobs\GenerateKeyframeJob;
 use App\Jobs\JudgeKeyframeJob;
@@ -24,6 +25,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Queue\Middleware\RateLimited;
 use Illuminate\Queue\Middleware\ThrottlesExceptions;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\RateLimiter;
 use Prism\Prism\Facades\Prism;
@@ -239,6 +241,46 @@ class AgentRateLimitTest extends TestCase
         ]);
     }
 
+    public function test_shots_planned_after_the_brief_failed_are_dropped(): void
+    {
+        Queue::fake([ProcessKeyframesJob::class]);
+        Event::fake([ShotUpdated::class]);
+
+        $brief = Brief::create([
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+            'state' => BriefState::Planning,
+            'style_anchor' => 'Cinematic neon rain.',
+        ]);
+
+        (new PlanBriefJob($brief->id))->handle(new BriefFailingPlanningAgent($brief, failDuring: 'plan'), app(Budget::class));
+
+        $brief->refresh();
+        $this->assertSame(BriefState::Failed, $brief->state);
+        $this->assertSame(0, $brief->shots()->count());
+        $this->assertArrayNotHasKey('plan_shots', $brief->metadata['agent_claims'] ?? []);
+        Event::assertNotDispatched(ShotUpdated::class);
+        Queue::assertNotPushed(ProcessKeyframesJob::class);
+    }
+
+    public function test_a_style_anchor_finished_after_the_brief_failed_is_dropped(): void
+    {
+        Queue::fake([ProcessKeyframesJob::class]);
+
+        $brief = Brief::create([
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+            'state' => BriefState::Planning,
+        ]);
+        $agent = new BriefFailingPlanningAgent($brief, failDuring: 'style');
+
+        (new PlanBriefJob($brief->id))->handle($agent, app(Budget::class));
+
+        $brief->refresh();
+        $this->assertSame(BriefState::Failed, $brief->state);
+        $this->assertNull($brief->style_anchor);
+        $this->assertSame(0, $agent->planCalls);
+        $this->assertSame(0, $brief->shots()->count());
+    }
+
     public function test_a_planning_claim_already_held_skips_the_call_and_refunds(): void
     {
         Queue::fake([ProcessKeyframesJob::class]);
@@ -378,6 +420,46 @@ class RateLimitedPlanningAgent implements AgentInterface
     public function rewritePrompt(array $context): string
     {
         return $context['original_prompt'];
+    }
+}
+
+class BriefFailingPlanningAgent implements AgentInterface
+{
+    public int $planCalls = 0;
+
+    public function __construct(
+        private readonly Brief $brief,
+        private readonly string $failDuring,
+    ) {}
+
+    public function planShots(string $prompt): array
+    {
+        $this->planCalls++;
+        $this->failBriefDuring('plan');
+
+        return [
+            ['sequence' => 1, 'prompt' => 'Wide shot of rainy Tokyo.'],
+            ['sequence' => 2, 'prompt' => 'Close shot of the neon sign.'],
+        ];
+    }
+
+    public function generateStyleAnchor(string $prompt): string
+    {
+        $this->failBriefDuring('style');
+
+        return 'Cinematic neon rain.';
+    }
+
+    public function rewritePrompt(array $context): string
+    {
+        return $context['original_prompt'];
+    }
+
+    private function failBriefDuring(string $step): void
+    {
+        if ($step === $this->failDuring) {
+            $this->brief->refresh()->failWithInFlightShots();
+        }
     }
 }
 

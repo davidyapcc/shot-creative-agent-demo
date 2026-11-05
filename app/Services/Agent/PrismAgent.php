@@ -219,6 +219,10 @@ class PrismAgent implements AgentInterface
 
         usort($planned, fn (array $left, array $right): int => $left['sequence'] <=> $right['sequence']);
 
+        if (array_column($planned, 'sequence') !== range(1, count($planned))) {
+            throw new InvalidArgumentException('Shot sequences must run 1 to n with no gaps or repeats.');
+        }
+
         return $planned;
     }
 

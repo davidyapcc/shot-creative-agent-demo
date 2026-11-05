@@ -140,9 +140,7 @@ class PlanBriefJob implements ShouldQueue
             throw $exception;
         }
 
-        $this->saveStyleAnchor($brief, $anchor);
-
-        return true;
+        return $this->saveStyleAnchor($brief, $anchor);
     }
 
     private function writeShots(Brief $brief, AgentInterface $agent, Budget $budget): bool
@@ -166,25 +164,28 @@ class PlanBriefJob implements ShouldQueue
             throw $exception;
         }
 
-        $shots = DB::transaction(function () use ($brief, $plannedShots): array {
+        $shots = DB::transaction(function () use ($brief, $plannedShots): ?array {
             $locked = Brief::query()->whereKey($brief->id)->lockForUpdate()->firstOrFail();
-            $created = [];
-
-            foreach ($plannedShots as $shotData) {
-                $created[] = Shot::create([
-                    'brief_id' => $brief->id,
-                    'sequence' => $shotData['sequence'],
-                    'prompt' => $shotData['prompt'],
-                    'state' => ShotState::Pending,
-                ]);
-            }
-
             $metadata = $locked->metadata ?? [];
             unset($metadata['agent_claims']['plan_shots']);
             $locked->update(['metadata' => $metadata]);
 
-            return $created;
+            // The brief failed while the call ran, so drop the late plan.
+            if ($locked->state !== BriefState::Planning) {
+                return null;
+            }
+
+            return array_map(fn (array $shotData): Shot => Shot::create([
+                'brief_id' => $brief->id,
+                'sequence' => $shotData['sequence'],
+                'prompt' => $shotData['prompt'],
+                'state' => ShotState::Pending,
+            ]), $plannedShots);
         });
+
+        if ($shots === null) {
+            return false;
+        }
 
         foreach ($shots as $shot) {
             ShotUpdated::dispatch($shot);
@@ -243,20 +244,27 @@ class PlanBriefJob implements ShouldQueue
         });
     }
 
-    private function saveStyleAnchor(Brief $brief, string $anchor): void
+    /**
+     * False when the brief failed while the call ran; the late anchor is dropped.
+     */
+    private function saveStyleAnchor(Brief $brief, string $anchor): bool
     {
-        DB::transaction(function () use ($brief, $anchor): void {
+        $saved = DB::transaction(function () use ($brief, $anchor): bool {
             $locked = Brief::query()->whereKey($brief->id)->lockForUpdate()->firstOrFail();
             $metadata = $locked->metadata ?? [];
             unset($metadata['agent_claims']['style_anchor']);
+            $isPlanning = $locked->state === BriefState::Planning;
 
-            $locked->update([
-                'style_anchor' => $anchor,
-                'metadata' => $metadata,
-            ]);
+            $locked->update($isPlanning
+                ? ['style_anchor' => $anchor, 'metadata' => $metadata]
+                : ['metadata' => $metadata]);
+
+            return $isPlanning;
         });
 
         $brief->refresh();
+
+        return $saved;
     }
 
     /**

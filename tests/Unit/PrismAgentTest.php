@@ -10,6 +10,7 @@ use App\Services\Agent\MockAgent;
 use App\Services\Agent\PrismAgent;
 use Illuminate\Support\Facades\Http;
 use InvalidArgumentException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Prism\Prism\Facades\Prism;
 use Prism\Prism\Testing\StructuredResponseFake;
 use Tests\TestCase;
@@ -161,6 +162,67 @@ class PrismAgentTest extends TestCase
             ['sequence' => 2, 'prompt' => 'Close shot of the neon sign.'],
             ['sequence' => 3, 'prompt' => 'Detail of the cup.'],
         ], $shots);
+    }
+
+    /**
+     * @return array<string, array{string, string}>
+     */
+    public static function defaultModels(): array
+    {
+        return [
+            'gemini' => ['gemini', 'gemini-3.8-flash'],
+            'openai' => ['openai', 'gpt-5.4-mini'],
+            'cloudflare' => ['cloudflare', '@cf/meta/llama-3.3-70b-instruct-fp8-fast'],
+        ];
+    }
+
+    #[DataProvider('defaultModels')]
+    public function test_an_unset_agent_model_uses_the_providers_own_default(string $provider, string $model): void
+    {
+        config([
+            'creative.agent.provider' => $provider,
+            'creative.agent.model' => null,
+            "services.{$provider}.key" => 'test-key',
+            'services.cloudflare.account_id' => 'account-id',
+        ]);
+        $fake = Prism::fake([StructuredResponseFake::make()->withStructured(['style_anchor' => 'Neon rain.'])]);
+
+        app(AgentInterface::class)->generateStyleAnchor('rainy Tokyo');
+
+        $fake->assertRequest(fn (array $requests) => $this->assertSame($model, $requests[0]->model()));
+    }
+
+    /**
+     * @return array<string, array{list<int>}>
+     */
+    public static function brokenSequences(): array
+    {
+        return [
+            'duplicate' => [[1, 1]],
+            'gap' => [[1, 5]],
+            'not starting at one' => [[2, 3]],
+        ];
+    }
+
+    /**
+     * @param  list<int>  $sequences
+     */
+    #[DataProvider('brokenSequences')]
+    public function test_plan_shots_rejects_sequences_that_are_not_one_to_n(array $sequences): void
+    {
+        Prism::fake([
+            StructuredResponseFake::make()->withStructured([
+                'shots' => array_map(
+                    fn (int $sequence): array => ['sequence' => $sequence, 'prompt' => "Shot {$sequence}."],
+                    $sequences,
+                ),
+            ]),
+        ]);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Shot sequences must run 1 to n with no gaps or repeats.');
+
+        $this->agent()->planShots('rainy Tokyo');
     }
 
     public function test_plan_shots_rejects_a_plan_that_is_not_two_or_three_shots(): void

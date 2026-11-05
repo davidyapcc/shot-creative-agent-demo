@@ -121,6 +121,10 @@ class AppServiceProvider extends ServiceProvider
         $model = config('creative.agent.model');
 
         if (! is_string($model) || trim($model) === '') {
+            $model = config("creative.agent.default_models.{$provider}");
+        }
+
+        if (! is_string($model) || trim($model) === '') {
             throw new InvalidArgumentException("AGENT_MODEL is required when AGENT_PROVIDER={$provider}.");
         }
 
