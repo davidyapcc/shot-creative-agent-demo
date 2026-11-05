@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Agent;
 
 use App\Contracts\AgentInterface;
+use App\DTOs\ShotPlan;
 use App\Exceptions\ProviderRateLimitedException;
 use InvalidArgumentException;
 use Prism\Prism\Enums\Provider;
@@ -24,35 +25,12 @@ class PrismAgent implements AgentInterface
         private readonly ?string $url = null,
     ) {}
 
-    public function planShots(string $prompt): array
+    public function planShots(string $prompt): ShotPlan
     {
-        return $this->validatedShots($this->structured(
+        return ShotPlan::fromStructured($this->structured(
             $this->shotPlanSchema(),
-            "Plan 2 or 3 shots for this brief.\n\nBrief: {$prompt}",
+            "Plan 2 or 3 shots for this brief, and write one style anchor: the consistent look every keyframe will share.\n\nBrief: {$prompt}",
         ));
-    }
-
-    public function generateStyleAnchor(string $prompt): string
-    {
-        $structured = $this->structured(
-            new ObjectSchema(
-                name: 'style_anchor',
-                description: 'A style anchor applied to every keyframe',
-                properties: [
-                    new StringSchema('style_anchor', 'Consistent visual style for the keyframes'),
-                ],
-                requiredFields: ['style_anchor'],
-            ),
-            "Write a style anchor for the keyframes of this brief. Keep one consistent look.\n\nBrief: {$prompt}",
-        );
-
-        $anchor = $structured['style_anchor'] ?? null;
-
-        if (! is_string($anchor) || trim($anchor) === '') {
-            throw new InvalidArgumentException('Agent style anchor must be a non-empty string.');
-        }
-
-        return trim($anchor);
     }
 
     public function rewritePrompt(array $context): string
@@ -177,8 +155,9 @@ class PrismAgent implements AgentInterface
     {
         return new ObjectSchema(
             name: 'shot_plan',
-            description: 'Two or three shots planned from a creative brief',
+            description: 'Two or three shots planned from a creative brief, with one shared style anchor',
             properties: [
+                new StringSchema('style_anchor', 'Consistent visual style applied to every keyframe'),
                 new ArraySchema(
                     name: 'shots',
                     description: 'Between 2 and 3 shots',
@@ -195,56 +174,7 @@ class PrismAgent implements AgentInterface
                     maxItems: 3,
                 ),
             ],
-            requiredFields: ['shots'],
+            requiredFields: ['style_anchor', 'shots'],
         );
-    }
-
-    /**
-     * @param  array<string, mixed>  $structured
-     * @return array<int, array{sequence: int, prompt: string}>
-     */
-    private function validatedShots(array $structured): array
-    {
-        $shots = $structured['shots'] ?? null;
-
-        if (! is_array($shots) || ! array_is_list($shots) || count($shots) < 2 || count($shots) > 3) {
-            throw new InvalidArgumentException('Agent plan must contain 2 or 3 shots.');
-        }
-
-        $planned = [];
-
-        foreach ($shots as $shot) {
-            $planned[] = $this->validatedShot($shot);
-        }
-
-        usort($planned, fn (array $left, array $right): int => $left['sequence'] <=> $right['sequence']);
-
-        if (array_column($planned, 'sequence') !== range(1, count($planned))) {
-            throw new InvalidArgumentException('Shot sequences must run 1 to n with no gaps or repeats.');
-        }
-
-        return $planned;
-    }
-
-    /**
-     * @return array{sequence: int, prompt: string}
-     */
-    private function validatedShot(mixed $shot): array
-    {
-        if (! is_array($shot)) {
-            throw new InvalidArgumentException('Each shot needs a sequence and a prompt.');
-        }
-
-        $sequence = $shot['sequence'] ?? null;
-        $prompt = $shot['prompt'] ?? null;
-
-        if (! is_int($sequence) || $sequence < 1 || ! is_string($prompt) || trim($prompt) === '') {
-            throw new InvalidArgumentException('Each shot needs a sequence and a prompt.');
-        }
-
-        return [
-            'sequence' => $sequence,
-            'prompt' => trim($prompt),
-        ];
     }
 }

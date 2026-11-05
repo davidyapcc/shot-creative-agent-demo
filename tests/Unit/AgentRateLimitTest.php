@@ -7,6 +7,7 @@ namespace Tests\Unit;
 use App\Contracts\AgentInterface;
 use App\Contracts\JudgeInterface;
 use App\DTOs\JudgementResult;
+use App\DTOs\ShotPlan;
 use App\Enums\BriefState;
 use App\Enums\JudgementVerdict;
 use App\Enums\ShotState;
@@ -18,6 +19,7 @@ use App\Jobs\PlanBriefJob;
 use App\Jobs\ProcessKeyframesJob;
 use App\Models\Brief;
 use App\Models\Shot;
+use App\Services\Agent\MockAgent;
 use App\Services\Budget;
 use App\Services\RateLimitHitCounter;
 use App\Services\ShotStepRetry;
@@ -77,42 +79,7 @@ class AgentRateLimitTest extends TestCase
         $failed->assertNotReleased();
     }
 
-    public function test_rate_limited_style_anchor_is_refunded_and_a_retry_can_plan(): void
-    {
-        Queue::fake([ProcessKeyframesJob::class]);
-
-        $brief = Brief::create([
-            'prompt' => '15s product teaser, rainy Tokyo, neon',
-            'state' => BriefState::Pending,
-        ]);
-        $agent = new RateLimitedPlanningAgent(failStyleTimes: 1);
-
-        try {
-            (new PlanBriefJob($brief->id))->handle($agent, app(Budget::class), app(RateLimitHitCounter::class));
-            $this->fail('The rate-limit error should escape the job.');
-        } catch (ProviderRateLimitedException) {
-            $brief->refresh();
-            $this->assertSame(BriefState::Planning, $brief->state);
-            $this->assertNull($brief->style_anchor);
-            $this->assertSame(0, $brief->budget_used);
-            $this->assertSame([], $brief->metadata['budget_ledger'] ?? []);
-            $this->assertSame(1, app(RateLimitHitCounter::class)->count('agent'));
-        }
-
-        (new PlanBriefJob($brief->id))->handle($agent, app(Budget::class), app(RateLimitHitCounter::class));
-
-        $brief->refresh();
-        $this->assertSame(2, $agent->styleCalls);
-        $this->assertSame(1, $agent->planCalls);
-        $this->assertSame('Cinematic neon rain.', $brief->style_anchor);
-        $this->assertCount(2, $brief->shots);
-        $this->assertSame(2, $brief->budget_used);
-        $this->assertSame('generateStyleAnchor', $brief->metadata['budget_ledger'][0]['operation']);
-        $this->assertSame('planShots', $brief->metadata['budget_ledger'][1]['operation']);
-        $this->assertSame(BriefState::Keyframes, $brief->state);
-    }
-
-    public function test_rate_limited_plan_keeps_the_style_anchor_and_a_retry_does_not_pay_for_it_again(): void
+    public function test_rate_limited_plan_is_refunded_and_a_retry_plans_once(): void
     {
         Queue::fake([ProcessKeyframesJob::class]);
 
@@ -127,32 +94,32 @@ class AgentRateLimitTest extends TestCase
             $this->fail('The rate-limit error should escape the job.');
         } catch (ProviderRateLimitedException) {
             $brief->refresh();
-            $this->assertSame('Cinematic neon rain.', $brief->style_anchor);
-            $this->assertSame(1, $brief->budget_used);
-            $this->assertSame('generateStyleAnchor', $brief->metadata['budget_ledger'][0]['operation']);
-            $this->assertCount(0, $brief->shots);
+            $this->assertSame(BriefState::Planning, $brief->state);
+            $this->assertNull($brief->style_anchor);
+            $this->assertSame(0, $brief->budget_used);
+            $this->assertSame([], $brief->metadata['budget_ledger'] ?? []);
+            $this->assertArrayNotHasKey('planning_claimed', $brief->metadata ?? []);
             $this->assertSame(1, app(RateLimitHitCounter::class)->count('agent'));
         }
 
         (new PlanBriefJob($brief->id))->handle($agent, app(Budget::class), app(RateLimitHitCounter::class));
 
         $brief->refresh();
-        $this->assertSame(1, $agent->styleCalls);
         $this->assertSame(2, $agent->planCalls);
+        $this->assertSame('Cinematic neon rain.', $brief->style_anchor);
         $this->assertCount(2, $brief->shots);
-        $this->assertSame(2, $brief->budget_used);
+        $this->assertSame(1, $brief->budget_used);
+        $this->assertSame(['planShots'], array_column($brief->metadata['budget_ledger'], 'operation'));
         $this->assertSame(BriefState::Keyframes, $brief->state);
     }
 
-    public function test_prism_planning_stores_the_style_anchor_and_meters_both_calls(): void
+    public function test_prism_planning_stores_the_style_anchor_and_shots_from_one_metered_call(): void
     {
         Queue::fake([ProcessKeyframesJob::class]);
 
         Prism::fake([
             StructuredResponseFake::make()->withStructured([
                 'style_anchor' => 'Cinematic neon rain.',
-            ]),
-            StructuredResponseFake::make()->withStructured([
                 'shots' => [
                     ['sequence' => 1, 'prompt' => 'Wide shot of rainy Tokyo.'],
                     ['sequence' => 2, 'prompt' => 'Close shot of the neon sign.'],
@@ -178,12 +145,10 @@ class AgentRateLimitTest extends TestCase
         $this->assertSame('Cinematic neon rain.', $brief->style_anchor);
         $this->assertCount(3, $brief->shots);
         $this->assertSame('Wide shot of rainy Tokyo.', $brief->shots[0]->prompt);
-        $this->assertSame(2, $brief->budget_used);
-        $this->assertSame(
-            ['generateStyleAnchor', 'planShots'],
-            array_column($brief->metadata['budget_ledger'], 'operation'),
-        );
+        $this->assertSame(1, $brief->budget_used);
+        $this->assertSame(['planShots'], array_column($brief->metadata['budget_ledger'], 'operation'));
         $this->assertSame('agent', $brief->metadata['budget_ledger'][0]['provider']);
+        $this->assertArrayNotHasKey('planning_claimed', $brief->metadata);
         Queue::assertPushed(ProcessKeyframesJob::class);
     }
 
@@ -241,7 +206,7 @@ class AgentRateLimitTest extends TestCase
         ]);
     }
 
-    public function test_shots_planned_after_the_brief_failed_are_dropped(): void
+    public function test_a_plan_finished_after_the_brief_failed_is_dropped(): void
     {
         Queue::fake([ProcessKeyframesJob::class]);
         Event::fake([ShotUpdated::class]);
@@ -249,36 +214,17 @@ class AgentRateLimitTest extends TestCase
         $brief = Brief::create([
             'prompt' => '15s product teaser, rainy Tokyo, neon',
             'state' => BriefState::Planning,
-            'style_anchor' => 'Cinematic neon rain.',
         ]);
 
-        (new PlanBriefJob($brief->id))->handle(new BriefFailingPlanningAgent($brief, failDuring: 'plan'), app(Budget::class));
-
-        $brief->refresh();
-        $this->assertSame(BriefState::Failed, $brief->state);
-        $this->assertSame(0, $brief->shots()->count());
-        $this->assertArrayNotHasKey('plan_shots', $brief->metadata['agent_claims'] ?? []);
-        Event::assertNotDispatched(ShotUpdated::class);
-        Queue::assertNotPushed(ProcessKeyframesJob::class);
-    }
-
-    public function test_a_style_anchor_finished_after_the_brief_failed_is_dropped(): void
-    {
-        Queue::fake([ProcessKeyframesJob::class]);
-
-        $brief = Brief::create([
-            'prompt' => '15s product teaser, rainy Tokyo, neon',
-            'state' => BriefState::Planning,
-        ]);
-        $agent = new BriefFailingPlanningAgent($brief, failDuring: 'style');
-
-        (new PlanBriefJob($brief->id))->handle($agent, app(Budget::class));
+        (new PlanBriefJob($brief->id))->handle(new BriefFailingPlanningAgent($brief), app(Budget::class));
 
         $brief->refresh();
         $this->assertSame(BriefState::Failed, $brief->state);
         $this->assertNull($brief->style_anchor);
-        $this->assertSame(0, $agent->planCalls);
         $this->assertSame(0, $brief->shots()->count());
+        $this->assertArrayNotHasKey('planning_claimed', $brief->metadata);
+        Event::assertNotDispatched(ShotUpdated::class);
+        Queue::assertNotPushed(ProcessKeyframesJob::class);
     }
 
     public function test_a_planning_claim_already_held_skips_the_call_and_refunds(): void
@@ -288,14 +234,13 @@ class AgentRateLimitTest extends TestCase
         $brief = Brief::create([
             'prompt' => '15s product teaser, rainy Tokyo, neon',
             'state' => BriefState::Planning,
-            'metadata' => ['agent_claims' => ['style_anchor' => true]],
+            'metadata' => ['planning_claimed' => true],
         ]);
         $agent = new RateLimitedPlanningAgent;
 
         (new PlanBriefJob($brief->id))->handle($agent, app(Budget::class));
 
         $brief->refresh();
-        $this->assertSame(0, $agent->styleCalls);
         $this->assertSame(0, $agent->planCalls);
         $this->assertSame(0, $brief->budget_used);
         $this->assertSame([], $brief->metadata['budget_ledger'] ?? []);
@@ -383,16 +328,13 @@ class AgentRateLimitTest extends TestCase
 
 class RateLimitedPlanningAgent implements AgentInterface
 {
-    public int $styleCalls = 0;
-
     public int $planCalls = 0;
 
     public function __construct(
-        private readonly int $failStyleTimes = 0,
         private readonly int $failPlanTimes = 0,
     ) {}
 
-    public function planShots(string $prompt): array
+    public function planShots(string $prompt): ShotPlan
     {
         $this->planCalls++;
 
@@ -400,21 +342,10 @@ class RateLimitedPlanningAgent implements AgentInterface
             throw new ProviderRateLimitedException('Gemini agent returned HTTP 429.');
         }
 
-        return [
+        return new ShotPlan('Cinematic neon rain.', [
             ['sequence' => 1, 'prompt' => 'Wide shot of rainy Tokyo.'],
             ['sequence' => 2, 'prompt' => 'Close shot of the neon sign.'],
-        ];
-    }
-
-    public function generateStyleAnchor(string $prompt): string
-    {
-        $this->styleCalls++;
-
-        if ($this->styleCalls <= $this->failStyleTimes) {
-            throw new ProviderRateLimitedException('Gemini agent returned HTTP 429.');
-        }
-
-        return 'Cinematic neon rain.';
+        ]);
     }
 
     public function rewritePrompt(array $context): string
@@ -423,43 +354,24 @@ class RateLimitedPlanningAgent implements AgentInterface
     }
 }
 
+/**
+ * Fails the brief while the plan call is running, as the budget stop or a
+ * failed sibling job would.
+ */
 class BriefFailingPlanningAgent implements AgentInterface
 {
-    public int $planCalls = 0;
+    public function __construct(private readonly Brief $brief) {}
 
-    public function __construct(
-        private readonly Brief $brief,
-        private readonly string $failDuring,
-    ) {}
-
-    public function planShots(string $prompt): array
+    public function planShots(string $prompt): ShotPlan
     {
-        $this->planCalls++;
-        $this->failBriefDuring('plan');
+        $this->brief->refresh()->failWithInFlightShots();
 
-        return [
-            ['sequence' => 1, 'prompt' => 'Wide shot of rainy Tokyo.'],
-            ['sequence' => 2, 'prompt' => 'Close shot of the neon sign.'],
-        ];
-    }
-
-    public function generateStyleAnchor(string $prompt): string
-    {
-        $this->failBriefDuring('style');
-
-        return 'Cinematic neon rain.';
+        return (new MockAgent)->planShots($prompt);
     }
 
     public function rewritePrompt(array $context): string
     {
         return $context['original_prompt'];
-    }
-
-    private function failBriefDuring(string $step): void
-    {
-        if ($step === $this->failDuring) {
-            $this->brief->refresh()->failWithInFlightShots();
-        }
     }
 }
 
@@ -467,14 +379,9 @@ class RateLimitedRewriteAgent implements AgentInterface
 {
     public int $rewrites = 0;
 
-    public function planShots(string $prompt): array
+    public function planShots(string $prompt): ShotPlan
     {
-        return [];
-    }
-
-    public function generateStyleAnchor(string $prompt): string
-    {
-        return 'style';
+        return (new MockAgent)->planShots($prompt);
     }
 
     public function rewritePrompt(array $context): string
@@ -493,14 +400,9 @@ class LateRewriteAgent implements AgentInterface
 {
     public function __construct(private readonly Shot $shot) {}
 
-    public function planShots(string $prompt): array
+    public function planShots(string $prompt): ShotPlan
     {
-        return [];
-    }
-
-    public function generateStyleAnchor(string $prompt): string
-    {
-        return 'style';
+        return (new MockAgent)->planShots($prompt);
     }
 
     public function rewritePrompt(array $context): string
@@ -516,14 +418,9 @@ class SteadyRewriteAgent implements AgentInterface
 {
     public int $rewrites = 0;
 
-    public function planShots(string $prompt): array
+    public function planShots(string $prompt): ShotPlan
     {
-        return [];
-    }
-
-    public function generateStyleAnchor(string $prompt): string
-    {
-        return 'style';
+        return (new MockAgent)->planShots($prompt);
     }
 
     public function rewritePrompt(array $context): string

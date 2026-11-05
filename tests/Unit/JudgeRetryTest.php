@@ -9,6 +9,7 @@ use App\Contracts\ImageProviderInterface;
 use App\Contracts\JudgeInterface;
 use App\Contracts\VideoProviderInterface;
 use App\DTOs\JudgementResult;
+use App\DTOs\ShotPlan;
 use App\Enums\BriefState;
 use App\Enums\JudgementVerdict;
 use App\Enums\ShotState;
@@ -18,6 +19,7 @@ use App\Jobs\JudgeVideoJob;
 use App\Jobs\PollVideoRenderJob;
 use App\Models\Brief;
 use App\Models\Shot;
+use App\Services\Agent\MockAgent;
 use App\Services\Budget;
 use App\Services\ShotStepRetry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -329,14 +331,9 @@ class RecordingAgent implements AgentInterface
      */
     public array $contexts = [];
 
-    public function planShots(string $prompt): array
+    public function planShots(string $prompt): ShotPlan
     {
-        return [];
-    }
-
-    public function generateStyleAnchor(string $prompt): string
-    {
-        return 'style';
+        return (new MockAgent)->planShots($prompt);
     }
 
     public function rewritePrompt(array $context): string

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Contracts\AgentInterface;
+use App\DTOs\ShotPlan;
 use App\Enums\BriefState;
 use App\Enums\ShotState;
 use App\Events\ShotUpdated;
@@ -14,6 +15,7 @@ use App\Models\Shot;
 use App\Services\Budget;
 use App\Services\RateLimitHitCounter;
 use App\Traits\FailsBriefOnJobFailure;
+use Closure;
 use DateTimeInterface;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -36,6 +38,16 @@ class PlanBriefJob implements ShouldQueue
     private const THROTTLE_DECAY_SECONDS = 300;
 
     private const THROTTLE_BACKOFF_MINUTES = 1;
+
+    /**
+     * Ledger operation for the one paid planning call.
+     */
+    private const PLAN_OPERATION = 'planShots';
+
+    /**
+     * Brief metadata flag held while a worker's plan call is in flight.
+     */
+    private const CLAIM_KEY = 'planning_claimed';
 
     /**
      * A timed-out run already took its charge, so a retry would pay twice.
@@ -88,7 +100,6 @@ class PlanBriefJob implements ShouldQueue
         try {
             $this->plan($brief, $agent, $budget);
         } catch (ProviderRateLimitedException $exception) {
-            $this->refundPlanningCharge($brief, $budget);
             $rateLimits->increment('agent');
 
             throw $exception;
@@ -97,15 +108,7 @@ class PlanBriefJob implements ShouldQueue
 
     private function plan(Brief $brief, AgentInterface $agent, Budget $budget): void
     {
-        $brief->refresh();
-
-        if (! $this->hasStyleAnchor($brief) && ! $this->writeStyleAnchor($brief, $agent, $budget)) {
-            return;
-        }
-
-        $brief->refresh();
-
-        if ($brief->shots()->doesntExist() && ! $this->writeShots($brief, $agent, $budget)) {
+        if ($brief->shots()->doesntExist() && ! $this->writePlan($brief, $agent, $budget)) {
             return;
         }
 
@@ -119,171 +122,116 @@ class PlanBriefJob implements ShouldQueue
         ProcessKeyframesJob::dispatch($brief->id);
     }
 
-    private function writeStyleAnchor(Brief $brief, AgentInterface $agent, Budget $budget): bool
+    /**
+     * Charge, claim, call the agent once, then store the plan. False when
+     * nothing was stored: the budget stopped it, another worker holds the
+     * claim, or the brief failed during the call.
+     */
+    private function writePlan(Brief $brief, AgentInterface $agent, Budget $budget): bool
     {
-        if (! $budget->chargeOrDegrade($brief, 'agent', 'generateStyleAnchor')) {
+        if (! $budget->chargeOrDegrade($brief, 'agent', self::PLAN_OPERATION)) {
             return false;
         }
 
-        if (! $this->claim($brief, 'style_anchor')) {
-            $budget->refund($brief, 'agent', 'generateStyleAnchor');
-            $brief->refresh();
-
-            return $this->hasStyleAnchor($brief);
-        }
-
-        try {
-            $anchor = $agent->generateStyleAnchor($brief->prompt);
-        } catch (ProviderRateLimitedException $exception) {
-            $this->releaseClaim($brief, 'style_anchor');
-
-            throw $exception;
-        }
-
-        return $this->saveStyleAnchor($brief, $anchor);
-    }
-
-    private function writeShots(Brief $brief, AgentInterface $agent, Budget $budget): bool
-    {
-        if (! $budget->chargeOrDegrade($brief, 'agent', 'planShots')) {
-            return false;
-        }
-
-        if (! $this->claim($brief, 'plan_shots')) {
-            $budget->refund($brief, 'agent', 'planShots');
-            $brief->refresh();
+        if (! $this->claim($brief)) {
+            $budget->refund($brief, 'agent', self::PLAN_OPERATION);
 
             return $brief->shots()->exists();
         }
 
         try {
-            $plannedShots = $agent->planShots($brief->prompt);
+            $plan = $agent->planShots($brief->prompt);
         } catch (ProviderRateLimitedException $exception) {
-            $this->releaseClaim($brief, 'plan_shots');
+            // A refused request spent no quota.
+            $this->releaseClaim($brief);
+            $budget->refund($brief, 'agent', self::PLAN_OPERATION);
 
             throw $exception;
         }
 
-        $shots = DB::transaction(function () use ($brief, $plannedShots): ?array {
-            $locked = Brief::query()->whereKey($brief->id)->lockForUpdate()->firstOrFail();
-            $metadata = $locked->metadata ?? [];
-            unset($metadata['agent_claims']['plan_shots']);
-            $locked->update(['metadata' => $metadata]);
+        $shots = $this->savePlan($brief, $plan);
 
-            // The brief failed while the call ran, so drop the late plan.
-            if ($locked->state !== BriefState::Planning) {
-                return null;
-            }
-
-            return array_map(fn (array $shotData): Shot => Shot::create([
-                'brief_id' => $brief->id,
-                'sequence' => $shotData['sequence'],
-                'prompt' => $shotData['prompt'],
-                'state' => ShotState::Pending,
-            ]), $plannedShots);
-        });
-
-        if ($shots === null) {
-            return false;
-        }
-
-        foreach ($shots as $shot) {
+        foreach ($shots ?? [] as $shot) {
             ShotUpdated::dispatch($shot);
         }
 
-        return true;
+        return $shots !== null;
     }
 
     /**
-     * Reserve this step under a row lock so a second worker does not pay for it.
+     * Reserve the plan call under a row lock so a second worker does not pay for it.
      */
-    private function claim(Brief $brief, string $step): bool
+    private function claim(Brief $brief): bool
     {
-        return DB::transaction(function () use ($brief, $step): bool {
-            $locked = Brief::query()->whereKey($brief->id)->lockForUpdate()->first();
-
-            if ($locked === null || $locked->state !== BriefState::Planning) {
+        return $this->withLockedBrief($brief, function (Brief $locked): bool {
+            if ($locked->state !== BriefState::Planning
+                || $locked->shots()->exists()
+                || ($locked->metadata[self::CLAIM_KEY] ?? false) === true) {
                 return false;
             }
 
-            if ($step === 'style_anchor' && $this->hasStyleAnchor($locked)) {
-                return false;
-            }
-
-            if ($step === 'plan_shots' && $locked->shots()->exists()) {
-                return false;
-            }
-
-            $metadata = $locked->metadata ?? [];
-            $claims = $metadata['agent_claims'] ?? [];
-
-            if (($claims[$step] ?? false) === true) {
-                return false;
-            }
-
-            $claims[$step] = true;
-            $metadata['agent_claims'] = $claims;
-            $locked->update(['metadata' => $metadata]);
+            $locked->update(['metadata' => [...$locked->metadata ?? [], self::CLAIM_KEY => true]]);
 
             return true;
         });
     }
 
-    private function releaseClaim(Brief $brief, string $step): void
+    private function releaseClaim(Brief $brief): void
     {
-        DB::transaction(function () use ($brief, $step): void {
-            $locked = Brief::query()->whereKey($brief->id)->lockForUpdate()->first();
+        $this->withLockedBrief($brief, function (Brief $locked): void {
+            $locked->update(['metadata' => $this->withoutClaim($locked)]);
+        });
+    }
 
-            if ($locked === null) {
-                return;
+    /**
+     * Store the anchor and shots together and clear the claim. Null when the
+     * brief failed while the call ran; the late plan is dropped.
+     *
+     * @return list<Shot>|null
+     */
+    private function savePlan(Brief $brief, ShotPlan $plan): ?array
+    {
+        return $this->withLockedBrief($brief, function (Brief $locked) use ($plan): ?array {
+            if ($locked->state !== BriefState::Planning) {
+                $locked->update(['metadata' => $this->withoutClaim($locked)]);
+
+                return null;
             }
 
-            $metadata = $locked->metadata ?? [];
-            unset($metadata['agent_claims'][$step]);
-            $locked->update(['metadata' => $metadata]);
+            $locked->update([
+                'style_anchor' => $plan->styleAnchor,
+                'metadata' => $this->withoutClaim($locked),
+            ]);
+
+            return array_map(fn (array $shot): Shot => Shot::create([
+                'brief_id' => $locked->id,
+                'sequence' => $shot['sequence'],
+                'prompt' => $shot['prompt'],
+                'state' => ShotState::Pending,
+            ]), $plan->shots);
         });
     }
 
     /**
-     * False when the brief failed while the call ran; the late anchor is dropped.
+     * @template T
+     *
+     * @param  Closure(Brief): T  $callback
+     * @return T
      */
-    private function saveStyleAnchor(Brief $brief, string $anchor): bool
+    private function withLockedBrief(Brief $brief, Closure $callback): mixed
     {
-        $saved = DB::transaction(function () use ($brief, $anchor): bool {
+        return DB::transaction(function () use ($brief, $callback): mixed {
             $locked = Brief::query()->whereKey($brief->id)->lockForUpdate()->firstOrFail();
-            $metadata = $locked->metadata ?? [];
-            unset($metadata['agent_claims']['style_anchor']);
-            $isPlanning = $locked->state === BriefState::Planning;
 
-            $locked->update($isPlanning
-                ? ['style_anchor' => $anchor, 'metadata' => $metadata]
-                : ['metadata' => $metadata]);
-
-            return $isPlanning;
+            return $callback($locked);
         });
-
-        $brief->refresh();
-
-        return $saved;
     }
 
     /**
-     * Give back the call the provider refused. A saved style anchor means the
-     * refused call was planning, not the anchor.
+     * @return array<string, mixed>
      */
-    private function refundPlanningCharge(Brief $brief, Budget $budget): void
+    private function withoutClaim(Brief $brief): array
     {
-        $brief->refresh();
-
-        $budget->refund(
-            $brief,
-            'agent',
-            $this->hasStyleAnchor($brief) ? 'planShots' : 'generateStyleAnchor',
-        );
-    }
-
-    private function hasStyleAnchor(Brief $brief): bool
-    {
-        return is_string($brief->style_anchor) && $brief->style_anchor !== '';
+        return array_diff_key($brief->metadata ?? [], [self::CLAIM_KEY => true]);
     }
 }

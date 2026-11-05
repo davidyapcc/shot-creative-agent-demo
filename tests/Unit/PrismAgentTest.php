@@ -17,6 +17,14 @@ use Tests\TestCase;
 
 class PrismAgentTest extends TestCase
 {
+    private const VALID_PLAN = [
+        'style_anchor' => 'Cinematic neon rain.',
+        'shots' => [
+            ['sequence' => 1, 'prompt' => 'Wide shot of rainy Tokyo.'],
+            ['sequence' => 2, 'prompt' => 'Close shot of the neon sign.'],
+        ],
+    ];
+
     public function test_mock_agent_remains_the_default(): void
     {
         config(['creative.agent.provider' => 'mock']);
@@ -120,6 +128,7 @@ class PrismAgentTest extends TestCase
     {
         $fake = Prism::fake([
             StructuredResponseFake::make()->withStructured([
+                'style_anchor' => 'Cinematic neon rain.',
                 'shots' => [
                     ['sequence' => 1, 'prompt' => 'Wide shot of rainy Tokyo.'],
                     ['sequence' => 2, 'prompt' => 'Close shot of the neon sign.'],
@@ -127,18 +136,20 @@ class PrismAgentTest extends TestCase
             ]),
         ]);
 
-        $shots = $this->agent()->planShots('15s product teaser, rainy Tokyo, neon');
+        $plan = $this->agent()->planShots('15s product teaser, rainy Tokyo, neon');
 
         $this->assertSame([
             ['sequence' => 1, 'prompt' => 'Wide shot of rainy Tokyo.'],
             ['sequence' => 2, 'prompt' => 'Close shot of the neon sign.'],
-        ], $shots);
+        ], $plan->shots);
+        $this->assertSame('Cinematic neon rain.', $plan->styleAnchor);
 
         $fake->assertRequest(function (array $requests): void {
             $this->assertCount(1, $requests);
             $this->assertSame('gemini', $requests[0]->provider());
             $this->assertSame('gemini-3.8-flash', $requests[0]->model());
             $this->assertStringContainsString('2 or 3', (string) $requests[0]->prompt());
+            $this->assertStringContainsString('style anchor', (string) $requests[0]->prompt());
             $this->assertStringContainsString('15s product teaser, rainy Tokyo, neon', (string) $requests[0]->prompt());
         });
     }
@@ -147,6 +158,7 @@ class PrismAgentTest extends TestCase
     {
         Prism::fake([
             StructuredResponseFake::make()->withStructured([
+                'style_anchor' => 'Cinematic neon rain.',
                 'shots' => [
                     ['sequence' => 3, 'prompt' => 'Detail of the cup.'],
                     ['sequence' => 1, 'prompt' => 'Wide shot of rainy Tokyo.'],
@@ -155,13 +167,13 @@ class PrismAgentTest extends TestCase
             ]),
         ]);
 
-        $shots = $this->agent()->planShots('rainy Tokyo');
+        $plan = $this->agent()->planShots('rainy Tokyo');
 
         $this->assertSame([
             ['sequence' => 1, 'prompt' => 'Wide shot of rainy Tokyo.'],
             ['sequence' => 2, 'prompt' => 'Close shot of the neon sign.'],
             ['sequence' => 3, 'prompt' => 'Detail of the cup.'],
-        ], $shots);
+        ], $plan->shots);
     }
 
     /**
@@ -185,9 +197,9 @@ class PrismAgentTest extends TestCase
             "services.{$provider}.key" => 'test-key',
             'services.cloudflare.account_id' => 'account-id',
         ]);
-        $fake = Prism::fake([StructuredResponseFake::make()->withStructured(['style_anchor' => 'Neon rain.'])]);
+        $fake = Prism::fake([StructuredResponseFake::make()->withStructured(self::VALID_PLAN)]);
 
-        app(AgentInterface::class)->generateStyleAnchor('rainy Tokyo');
+        app(AgentInterface::class)->planShots('rainy Tokyo');
 
         $fake->assertRequest(fn (array $requests) => $this->assertSame($model, $requests[0]->model()));
     }
@@ -212,6 +224,7 @@ class PrismAgentTest extends TestCase
     {
         Prism::fake([
             StructuredResponseFake::make()->withStructured([
+                'style_anchor' => 'Cinematic neon rain.',
                 'shots' => array_map(
                     fn (int $sequence): array => ['sequence' => $sequence, 'prompt' => "Shot {$sequence}."],
                     $sequences,
@@ -229,6 +242,7 @@ class PrismAgentTest extends TestCase
     {
         Prism::fake([
             StructuredResponseFake::make()->withStructured([
+                'style_anchor' => 'Cinematic neon rain.',
                 'shots' => [
                     ['sequence' => 1, 'prompt' => 'Only one shot.'],
                 ],
@@ -245,6 +259,7 @@ class PrismAgentTest extends TestCase
     {
         Prism::fake([
             StructuredResponseFake::make()->withStructured([
+                'style_anchor' => 'Cinematic neon rain.',
                 'shots' => [
                     ['sequence' => 1, 'prompt' => 'Wide shot of rainy Tokyo.'],
                     ['sequence' => 2, 'prompt' => '   '],
@@ -258,23 +273,22 @@ class PrismAgentTest extends TestCase
         $this->agent()->planShots('rainy Tokyo');
     }
 
-    public function test_style_anchor_is_returned_for_keyframes(): void
+    public function test_plan_shots_rejects_a_plan_without_a_style_anchor(): void
     {
-        $fake = Prism::fake([
+        Prism::fake([
             StructuredResponseFake::make()->withStructured([
-                'style_anchor' => 'Cinematic neon rain, cool teal highlights.',
+                'style_anchor' => '  ',
+                'shots' => [
+                    ['sequence' => 1, 'prompt' => 'Wide shot of rainy Tokyo.'],
+                    ['sequence' => 2, 'prompt' => 'Close shot of the neon sign.'],
+                ],
             ]),
         ]);
 
-        $anchor = $this->agent()->generateStyleAnchor('15s product teaser, rainy Tokyo, neon');
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Agent plan needs a style anchor.');
 
-        $this->assertSame('Cinematic neon rain, cool teal highlights.', $anchor);
-
-        $fake->assertRequest(function (array $requests): void {
-            $this->assertStringContainsString('style anchor', strtolower((string) $requests[0]->prompt()));
-            $this->assertStringContainsString('keyframes', strtolower((string) $requests[0]->prompt()));
-            $this->assertStringContainsString('15s product teaser, rainy Tokyo, neon', (string) $requests[0]->prompt());
-        });
+        $this->agent()->planShots('rainy Tokyo');
     }
 
     public function test_rewrite_sends_the_same_inputs_and_instructions_as_the_mock_path(): void
@@ -326,15 +340,11 @@ class PrismAgentTest extends TestCase
             'services.cloudflare.account_id' => 'account id',
         ]);
 
-        $fake = Prism::fake([
-            StructuredResponseFake::make()->withStructured([
-                'style_anchor' => 'Cinematic neon rain.',
-            ]),
-        ]);
+        $fake = Prism::fake([StructuredResponseFake::make()->withStructured(self::VALID_PLAN)]);
 
-        $anchor = app(AgentInterface::class)->generateStyleAnchor('rainy Tokyo');
+        $plan = app(AgentInterface::class)->planShots('rainy Tokyo');
 
-        $this->assertSame('Cinematic neon rain.', $anchor);
+        $this->assertSame('Cinematic neon rain.', $plan->styleAnchor);
         $fake->assertProviderConfig([
             'api_key' => 'test-key',
             'url' => 'https://api.cloudflare.com/client/v4/accounts/account%20id/ai/v1',

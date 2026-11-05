@@ -5,17 +5,16 @@ declare(strict_types=1);
 namespace App\Services\Agent;
 
 use App\Contracts\AgentInterface;
+use App\DTOs\ShotPlan;
 
 class MockAgent implements AgentInterface
 {
     /**
-     * Plan 2-3 shots deterministically based on prompt.
-     *
-     * @return array<int, array{sequence: int, prompt: string}>
+     * Plan 3 shots and a style anchor deterministically from the prompt.
      */
-    public function planShots(string $prompt): array
+    public function planShots(string $prompt): ShotPlan
     {
-        return [
+        return new ShotPlan("Consistent cinematic style, high dynamic range, matching color palette for: {$prompt}", [
             [
                 'sequence' => 1,
                 'prompt' => "Shot 1: Wide establishing shot setting the scene. {$prompt}",
@@ -28,12 +27,7 @@ class MockAgent implements AgentInterface
                 'sequence' => 3,
                 'prompt' => "Shot 3: Dynamic close-up highlighting key details and resolution. {$prompt}",
             ],
-        ];
-    }
-
-    public function generateStyleAnchor(string $prompt): string
-    {
-        return "Consistent cinematic style, high dynamic range, matching color palette for: {$prompt}";
+        ]);
     }
 
     public function rewritePrompt(array $context): string

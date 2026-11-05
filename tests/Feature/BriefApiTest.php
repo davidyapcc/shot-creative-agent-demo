@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Contracts\AgentInterface;
+use App\DTOs\ShotPlan;
 use App\Enums\BriefState;
 use App\Enums\ShotState;
 use App\Jobs\PlanBriefJob;
@@ -151,12 +152,7 @@ class BriefApiTest extends TestCase
     {
         $this->app->bind(AgentInterface::class, fn () => new class implements AgentInterface
         {
-            public function planShots(string $prompt): array
-            {
-                throw new RuntimeException('secret provider failure');
-            }
-
-            public function generateStyleAnchor(string $prompt): string
+            public function planShots(string $prompt): ShotPlan
             {
                 throw new RuntimeException('secret provider failure');
             }
