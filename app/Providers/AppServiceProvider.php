@@ -217,15 +217,15 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         RateLimiter::for(PlanBriefJob::RATE_LIMITER, function (): Limit {
-            return Limit::perMinute((int) config('creative.agent.requests_per_minute', 10));
+            return Limit::perMinute((int) config('creative.agent.requests_per_minute'));
         });
 
         RateLimiter::for(GenerateAudioJob::RATE_LIMITER, function (): Limit {
-            return Limit::perMinute((int) config('creative.audio_requests_per_minute', 10));
+            return Limit::perMinute((int) config('creative.audio_requests_per_minute'));
         });
 
         RateLimiter::for(JudgeKeyframeJob::RATE_LIMITER, function (): Limit {
-            return Limit::perMinute((int) config('creative.judge.requests_per_minute', 10));
+            return Limit::perMinute((int) config('creative.judge.requests_per_minute'));
         });
     }
 }
