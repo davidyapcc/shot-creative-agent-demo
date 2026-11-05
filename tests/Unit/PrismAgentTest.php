@@ -238,9 +238,14 @@ class PrismAgentTest extends TestCase
         $fake->assertRequest(function (array $requests): void {
             $prompt = (string) $requests[0]->prompt();
 
-            $this->assertStringContainsString('Preserve scene invariants.', $prompt);
-            $this->assertStringContainsString('Simplify only the failing element.', $prompt);
-            $this->assertStringContainsString('Do not repeat a fix that already failed.', $prompt);
+            $this->assertStringContainsString(
+                'Simplify only this failure: Left hand has six fingers. Keep the same scene.',
+                $prompt,
+            );
+            $this->assertStringContainsString(
+                'Use a different simplification than before for: Left hand has six fingers. Keep the same scene.',
+                $prompt,
+            );
             $this->assertStringContainsString('15s product teaser, rainy Tokyo, neon', $prompt);
             $this->assertStringContainsString('Shot 1: neon alley', $prompt);
             $this->assertStringContainsString('Left hand has six fingers.', $prompt);

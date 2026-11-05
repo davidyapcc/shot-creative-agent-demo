@@ -40,10 +40,10 @@ class MockAgent implements AgentInterface
     {
         $scene = $context['original_prompt'];
         $reason = $context['reason'] ?? 'the failing element';
-        $fix = "Simplify only this failure: {$reason}. Keep the same scene.";
+        $fix = RewriteInstructions::simplify($reason);
 
         if ($this->fixAlreadyFailed($fix, $scene, $context['previous_attempts'])) {
-            $fix = "Use a different simplification than before for: {$reason}. Keep the same scene.";
+            $fix = RewriteInstructions::different($reason);
         }
 
         return $scene.' '.$fix;

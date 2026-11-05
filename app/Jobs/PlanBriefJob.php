@@ -19,6 +19,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\RateLimited;
 use Illuminate\Queue\Middleware\ThrottlesExceptions;
+use Illuminate\Support\Facades\DB;
 use Throwable;
 
 class PlanBriefJob implements ShouldQueue
@@ -63,6 +64,14 @@ class PlanBriefJob implements ShouldQueue
         return now()->addHours(self::RETRY_WINDOW_HOURS);
     }
 
+    /**
+     * The cache key RateLimited uses for this job, so a rewrite can share it.
+     */
+    public static function rateLimitKey(): string
+    {
+        return md5(self::RATE_LIMITER);
+    }
+
     public function handle(AgentInterface $agent, Budget $budget, ?RateLimitHitCounter $rateLimits = null): void
     {
         $rateLimits ??= new RateLimitHitCounter;
@@ -88,33 +97,16 @@ class PlanBriefJob implements ShouldQueue
 
     private function plan(Brief $brief, AgentInterface $agent, Budget $budget): void
     {
-        if (! $this->hasStyleAnchor($brief)) {
-            if (! $budget->chargeOrDegrade($brief, 'agent', 'generateStyleAnchor')) {
-                return;
-            }
+        $brief->refresh();
 
-            $brief->update([
-                'style_anchor' => $agent->generateStyleAnchor($brief->prompt),
-            ]);
+        if (! $this->hasStyleAnchor($brief) && ! $this->writeStyleAnchor($brief, $agent, $budget)) {
+            return;
         }
 
         $brief->refresh();
 
-        if ($brief->shots()->doesntExist()) {
-            if (! $budget->chargeOrDegrade($brief, 'agent', 'planShots')) {
-                return;
-            }
-
-            foreach ($agent->planShots($brief->prompt) as $shotData) {
-                $shot = Shot::create([
-                    'brief_id' => $brief->id,
-                    'sequence' => $shotData['sequence'],
-                    'prompt' => $shotData['prompt'],
-                    'state' => ShotState::Pending,
-                ]);
-
-                ShotUpdated::dispatch($shot);
-            }
+        if ($brief->shots()->doesntExist() && ! $this->writeShots($brief, $agent, $budget)) {
+            return;
         }
 
         $brief->refresh();
@@ -125,6 +117,146 @@ class PlanBriefJob implements ShouldQueue
 
         $brief->transitionTo(BriefState::Keyframes);
         ProcessKeyframesJob::dispatch($brief->id);
+    }
+
+    private function writeStyleAnchor(Brief $brief, AgentInterface $agent, Budget $budget): bool
+    {
+        if (! $budget->chargeOrDegrade($brief, 'agent', 'generateStyleAnchor')) {
+            return false;
+        }
+
+        if (! $this->claim($brief, 'style_anchor')) {
+            $budget->refund($brief, 'agent', 'generateStyleAnchor');
+            $brief->refresh();
+
+            return $this->hasStyleAnchor($brief);
+        }
+
+        try {
+            $anchor = $agent->generateStyleAnchor($brief->prompt);
+        } catch (ProviderRateLimitedException $exception) {
+            $this->releaseClaim($brief, 'style_anchor');
+
+            throw $exception;
+        }
+
+        $this->saveStyleAnchor($brief, $anchor);
+
+        return true;
+    }
+
+    private function writeShots(Brief $brief, AgentInterface $agent, Budget $budget): bool
+    {
+        if (! $budget->chargeOrDegrade($brief, 'agent', 'planShots')) {
+            return false;
+        }
+
+        if (! $this->claim($brief, 'plan_shots')) {
+            $budget->refund($brief, 'agent', 'planShots');
+            $brief->refresh();
+
+            return $brief->shots()->exists();
+        }
+
+        try {
+            $plannedShots = $agent->planShots($brief->prompt);
+        } catch (ProviderRateLimitedException $exception) {
+            $this->releaseClaim($brief, 'plan_shots');
+
+            throw $exception;
+        }
+
+        $shots = DB::transaction(function () use ($brief, $plannedShots): array {
+            $locked = Brief::query()->whereKey($brief->id)->lockForUpdate()->firstOrFail();
+            $created = [];
+
+            foreach ($plannedShots as $shotData) {
+                $created[] = Shot::create([
+                    'brief_id' => $brief->id,
+                    'sequence' => $shotData['sequence'],
+                    'prompt' => $shotData['prompt'],
+                    'state' => ShotState::Pending,
+                ]);
+            }
+
+            $metadata = $locked->metadata ?? [];
+            unset($metadata['agent_claims']['plan_shots']);
+            $locked->update(['metadata' => $metadata]);
+
+            return $created;
+        });
+
+        foreach ($shots as $shot) {
+            ShotUpdated::dispatch($shot);
+        }
+
+        return true;
+    }
+
+    /**
+     * Reserve this step under a row lock so a second worker does not pay for it.
+     */
+    private function claim(Brief $brief, string $step): bool
+    {
+        return DB::transaction(function () use ($brief, $step): bool {
+            $locked = Brief::query()->whereKey($brief->id)->lockForUpdate()->first();
+
+            if ($locked === null || $locked->state !== BriefState::Planning) {
+                return false;
+            }
+
+            if ($step === 'style_anchor' && $this->hasStyleAnchor($locked)) {
+                return false;
+            }
+
+            if ($step === 'plan_shots' && $locked->shots()->exists()) {
+                return false;
+            }
+
+            $metadata = $locked->metadata ?? [];
+            $claims = $metadata['agent_claims'] ?? [];
+
+            if (($claims[$step] ?? false) === true) {
+                return false;
+            }
+
+            $claims[$step] = true;
+            $metadata['agent_claims'] = $claims;
+            $locked->update(['metadata' => $metadata]);
+
+            return true;
+        });
+    }
+
+    private function releaseClaim(Brief $brief, string $step): void
+    {
+        DB::transaction(function () use ($brief, $step): void {
+            $locked = Brief::query()->whereKey($brief->id)->lockForUpdate()->first();
+
+            if ($locked === null) {
+                return;
+            }
+
+            $metadata = $locked->metadata ?? [];
+            unset($metadata['agent_claims'][$step]);
+            $locked->update(['metadata' => $metadata]);
+        });
+    }
+
+    private function saveStyleAnchor(Brief $brief, string $anchor): void
+    {
+        DB::transaction(function () use ($brief, $anchor): void {
+            $locked = Brief::query()->whereKey($brief->id)->lockForUpdate()->firstOrFail();
+            $metadata = $locked->metadata ?? [];
+            unset($metadata['agent_claims']['style_anchor']);
+
+            $locked->update([
+                'style_anchor' => $anchor,
+                'metadata' => $metadata,
+            ]);
+        });
+
+        $brief->refresh();
     }
 
     /**

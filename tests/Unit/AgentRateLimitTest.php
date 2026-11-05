@@ -239,6 +239,99 @@ class AgentRateLimitTest extends TestCase
         ]);
     }
 
+    public function test_a_planning_claim_already_held_skips_the_call_and_refunds(): void
+    {
+        Queue::fake([ProcessKeyframesJob::class]);
+
+        $brief = Brief::create([
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+            'state' => BriefState::Planning,
+            'metadata' => ['agent_claims' => ['style_anchor' => true]],
+        ]);
+        $agent = new RateLimitedPlanningAgent;
+
+        (new PlanBriefJob($brief->id))->handle($agent, app(Budget::class));
+
+        $brief->refresh();
+        $this->assertSame(0, $agent->styleCalls);
+        $this->assertSame(0, $agent->planCalls);
+        $this->assertSame(0, $brief->budget_used);
+        $this->assertSame([], $brief->metadata['budget_ledger'] ?? []);
+    }
+
+    public function test_a_rewrite_finished_after_the_shot_stopped_is_dropped(): void
+    {
+        Bus::fake();
+
+        $brief = Brief::create([
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+            'state' => BriefState::Keyframes,
+            'style_anchor' => 'cinematic neon rain',
+        ]);
+        $shot = Shot::create([
+            'brief_id' => $brief->id,
+            'sequence' => 1,
+            'prompt' => 'Shot 1: neon alley',
+            'state' => ShotState::JudgingImage,
+            'keyframe_path' => 'keyframes/shot_1.png',
+        ]);
+        $agent = new LateRewriteAgent($shot);
+
+        (new JudgeKeyframeJob($shot->id, $brief->id))->handle(
+            new CountingFailJudge,
+            $this->app->make(ShotStepRetry::class, ['agent' => $agent]),
+            app(Budget::class),
+        );
+
+        $shot->refresh();
+        $this->assertSame(ShotState::Failed, $shot->state);
+        $this->assertSame('Shot 1: neon alley', $shot->prompt);
+        $this->assertSame(2, $brief->refresh()->budget_used);
+        Bus::assertNotDispatched(GenerateKeyframeJob::class);
+    }
+
+    public function test_rewrite_waits_on_the_agent_rate_limit_without_calling_or_judging_again(): void
+    {
+        Bus::fake();
+        config(['creative.agent.requests_per_minute' => 1]);
+        RateLimiter::hit(PlanBriefJob::rateLimitKey(), 60);
+
+        $brief = Brief::create([
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+            'state' => BriefState::Keyframes,
+            'style_anchor' => 'cinematic neon rain',
+        ]);
+        $shot = Shot::create([
+            'brief_id' => $brief->id,
+            'sequence' => 1,
+            'prompt' => 'Shot 1: neon alley',
+            'state' => ShotState::JudgingImage,
+            'keyframe_path' => 'keyframes/shot_1.png',
+        ]);
+        $agent = new SteadyRewriteAgent;
+        $judge = new CountingFailJudge;
+        $retry = $this->app->make(ShotStepRetry::class, ['agent' => $agent]);
+        $job = new JudgeKeyframeJob($shot->id, $brief->id);
+
+        try {
+            $job->handle($judge, $retry, app(Budget::class));
+            $this->fail('The agent rate limit should release the rewrite.');
+        } catch (ProviderRateLimitedException) {
+            $this->assertSame(0, $agent->rewrites);
+            $this->assertSame(1, $judge->calls);
+            $this->assertSame(1, $brief->refresh()->budget_used);
+        }
+
+        RateLimiter::clear(PlanBriefJob::rateLimitKey());
+        $job->handle($judge, $retry, app(Budget::class));
+
+        $shot->refresh();
+        $this->assertSame(1, $judge->calls);
+        $this->assertSame(1, $agent->rewrites);
+        $this->assertSame('Shot 1: neon alley. Simpler hand.', $shot->prompt);
+        $this->assertSame(2, $brief->refresh()->budget_used);
+    }
+
     private function throttle(PlanBriefJob $job): ThrottlesExceptions
     {
         return collect($job->middleware())
@@ -309,6 +402,51 @@ class RateLimitedRewriteAgent implements AgentInterface
         if ($this->rewrites === 1) {
             throw new ProviderRateLimitedException('Gemini agent returned HTTP 429.');
         }
+
+        return $context['original_prompt'].'. Simpler hand.';
+    }
+}
+
+class LateRewriteAgent implements AgentInterface
+{
+    public function __construct(private readonly Shot $shot) {}
+
+    public function planShots(string $prompt): array
+    {
+        return [];
+    }
+
+    public function generateStyleAnchor(string $prompt): string
+    {
+        return 'style';
+    }
+
+    public function rewritePrompt(array $context): string
+    {
+        $this->shot->refresh();
+        $this->shot->transitionTo(ShotState::Failed);
+
+        return 'Shot 1: neon alley. Late rewrite.';
+    }
+}
+
+class SteadyRewriteAgent implements AgentInterface
+{
+    public int $rewrites = 0;
+
+    public function planShots(string $prompt): array
+    {
+        return [];
+    }
+
+    public function generateStyleAnchor(string $prompt): string
+    {
+        return 'style';
+    }
+
+    public function rewritePrompt(array $context): string
+    {
+        $this->rewrites++;
 
         return $context['original_prompt'].'. Simpler hand.';
     }
