@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Unit;
 
-use App\Contracts\AgentInterface;
 use App\Contracts\JudgeInterface;
 use App\Contracts\VideoProviderInterface;
 use App\DTOs\JudgementResult;
@@ -19,6 +18,8 @@ use App\Jobs\PollVideoRenderJob;
 use App\Models\Brief;
 use App\Models\Judgement;
 use App\Models\Shot;
+use App\Services\Budget;
+use App\Services\ShotStepRetry;
 use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -69,7 +70,7 @@ class PollVideoRenderJobTest extends TestCase
     $job = new PollVideoRenderJob($shot->id, 'test-render-id', $brief->id);
     $job->withFakeQueueInteractions();
 
-    $job->handle($provider);
+    $job->handle($provider, app(Budget::class));
 
     $this->assertTrue($job->job->isReleased(), 'Job should be released back to queue.');
     $this->assertSame(PollVideoRenderJob::POLL_DELAY_SECONDS, $job->job->releaseDelay);
@@ -150,7 +151,7 @@ class PollVideoRenderJobTest extends TestCase
       ->willReturn(VideoRenderResult::completed($videoBytes));
 
     $job = new PollVideoRenderJob($shot->id, 'test-render-id', $brief->id);
-    $job->handle($provider);
+    $job->handle($provider, app(Budget::class));
 
     $shot->refresh();
 
@@ -310,7 +311,7 @@ class PollVideoRenderJobTest extends TestCase
       ));
 
     $job = new JudgeVideoJob($shot->id, $brief->id);
-    $job->handle($judge, app(AgentInterface::class));
+    $job->handle($judge, app(ShotStepRetry::class), app(Budget::class));
 
     $this->assertSame(ShotState::Done, $shot->refresh()->state);
 
@@ -355,7 +356,7 @@ class PollVideoRenderJobTest extends TestCase
       ));
 
     $job = new JudgeVideoJob($shot->id, $brief->id);
-    $job->handle($failingJudge, app(AgentInterface::class));
+    $job->handle($failingJudge, app(ShotStepRetry::class), app(Budget::class));
 
     $this->assertSame(ShotState::GeneratingVideo, $shot->refresh()->state);
     $this->assertSame(BriefState::Rendering, $brief->refresh()->state);

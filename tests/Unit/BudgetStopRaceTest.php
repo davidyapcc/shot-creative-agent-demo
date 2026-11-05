@@ -17,6 +17,8 @@ use App\Jobs\JudgeVideoJob;
 use App\Jobs\PollVideoRenderJob;
 use App\Models\Brief;
 use App\Models\Shot;
+use App\Services\Budget;
+use App\Services\ShotStepRetry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
@@ -53,7 +55,7 @@ class BudgetStopRaceTest extends TestCase
     });
 
     // Act
-    (new GenerateKeyframeJob($shot->id, $brief->id))->handle($images);
+    (new GenerateKeyframeJob($shot->id, $brief->id))->handle($images, app(Budget::class));
 
     // Assert
     $this->assertSame(ShotState::Failed, $shot->refresh()->state);
@@ -74,7 +76,7 @@ class BudgetStopRaceTest extends TestCase
     });
 
     // Act
-    (new PollVideoRenderJob($shot->id, 'render-1', $brief->id))->handle($videos);
+    (new PollVideoRenderJob($shot->id, 'render-1', $brief->id))->handle($videos, app(Budget::class));
 
     // Assert
     $this->assertSame(ShotState::Failed, $shot->refresh()->state);
@@ -96,7 +98,7 @@ class BudgetStopRaceTest extends TestCase
     });
 
     // Act
-    (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, $this->createMock(AgentInterface::class));
+    (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, $this->app->make(ShotStepRetry::class, ['agent' => $this->createMock(AgentInterface::class)]), app(Budget::class));
 
     // Assert
     $this->assertSame(ShotState::Failed, $shot->refresh()->state);

@@ -139,7 +139,7 @@ class WalkingSkeletonTest extends TestCase
 
     // Stage 4: Audio
     $audioJob = new GenerateAudioJob($brief->id);
-    $audioJob->handle(app(AudioProviderInterface::class));
+    $audioJob->handle(app(AudioProviderInterface::class), app(Budget::class));
 
     $brief->refresh();
     $this->assertSame(BriefState::Muxing, $brief->state);

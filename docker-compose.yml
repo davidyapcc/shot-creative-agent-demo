@@ -43,8 +43,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
-        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8000/up || exit 1"]
       interval: 5s
@@ -162,6 +162,34 @@ services:
       - "${FORWARD_MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
+
+  # One-shot: create the app's bucket so a fresh minio_data volume works.
+  # Without it every S3 write fails silently and muxing finds no clips.
+  minio-init:
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        max_attempts=60
+        attempt=1
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do
+          if [ "$$attempt" -ge "$$max_attempts" ]; then
+            echo "MinIO not reachable after $$max_attempts attempts" >&2
+            exit 1
+          fi
+          attempt=$$((attempt + 1))
+          sleep 1
+        done
+        mc mb --ignore-existing "local/$$AWS_BUCKET"
+    environment:
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      AWS_BUCKET: ${AWS_BUCKET:-shot-creative}
+    depends_on:
+      minio:
+        condition: service_started
 
 volumes:
   postgres_data:

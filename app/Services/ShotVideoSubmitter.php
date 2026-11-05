@@ -23,24 +23,7 @@ class ShotVideoSubmitter
   {
     $shot->loadMissing('brief');
 
-    if ($shot->state === ShotState::Failed || $shot->brief === null)
-    {
-      return null;
-    }
-
-    if ($shot->brief->metadata['budget_exhausted'] ?? false)
-    {
-      return null;
-    }
-
-    if (!$this->budget->chargeOrDegrade($shot->brief, 'video', 'submit'))
-    {
-      return null;
-    }
-
-    $shot->refresh();
-
-    if ($shot->state === ShotState::Failed)
+    if ($shot->brief === null || !$this->budget->chargeShotStep($shot, 'video', 'submit'))
     {
       return null;
     }
@@ -52,15 +35,7 @@ class ShotVideoSubmitter
 
     $renderId = $videos->submit($shot->prompt, (string) $shot->keyframe_path);
 
-    $metadata = $shot->metadata ?? [];
-    $videoAttempts = (int) ($metadata['step_attempts']['video'] ?? 0) + 1;
-    $metadata['step_attempts']['video'] = $videoAttempts;
-    $metadata['render_id'] = $renderId;
-
-    $shot->update([
-      'attempts' => (int) $shot->attempts + 1,
-      'metadata' => $metadata,
-    ]);
+    $shot->recordStepAttempt('video', ['render_id' => $renderId]);
 
     VideoProgressUpdated::dispatch($shot->brief_id, $shot->id, 0);
     ShotUpdated::dispatch($shot);

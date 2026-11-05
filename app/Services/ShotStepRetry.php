@@ -21,6 +21,9 @@ class ShotStepRetry
 
   public function __construct(
     private readonly AgentInterface $agent,
+    private readonly Budget $budget,
+    private readonly ShotVideoSubmitter $submitter,
+    private readonly VideoProviderInterface $videos,
   )
   {
   }
@@ -35,44 +38,73 @@ class ShotStepRetry
     $shot->loadMissing('brief');
 
     $step = $stage === JudgementStage::Image ? 'image' : 'video';
+    // Snapshot before the charge refreshes the shot; the attempt log is built on it.
     $metadata = $shot->metadata ?? [];
-    $log = $metadata['prompt_attempts'][$step] ?? [];
-    $used = (int) ($metadata['step_attempts'][$step] ?? 0);
 
-    if ($used > self::MAX_RETRIES)
+    if ($this->hasUsedAllRetries($shot, $metadata, $step))
     {
-      if ($shot->state->canTransitionTo(ShotState::Failed))
-      {
-        $shot->transitionTo(ShotState::Failed);
-      }
-
       return;
     }
 
-    if ($shot->brief !== null && !app(Budget::class)->chargeOrDegrade($shot->brief, 'agent', 'rewritePrompt'))
+    if (!$this->chargeRewrite($shot))
     {
       return;
+    }
+
+    $this->rewriteAndLogAttempt($shot, $verdict, $metadata, $step);
+    $this->retryStep($shot, $stage, $batch);
+  }
+
+  /**
+   * Fail the shot once its retries for this step are spent.
+   *
+   * @param array<string, mixed> $metadata
+   */
+  private function hasUsedAllRetries(Shot $shot, array $metadata, string $step): bool
+  {
+    $used = (int) ($metadata['step_attempts'][$step] ?? 0);
+
+    if ($used <= self::MAX_RETRIES)
+    {
+      return false;
+    }
+
+    if ($shot->state->canTransitionTo(ShotState::Failed))
+    {
+      $shot->transitionTo(ShotState::Failed);
+    }
+
+    return true;
+  }
+
+  /**
+   * Meter the rewrite call. False when the budget stop fired or failed the shot.
+   */
+  private function chargeRewrite(Shot $shot): bool
+  {
+    if ($shot->brief !== null && !$this->budget->chargeOrDegrade($shot->brief, 'agent', 'rewritePrompt'))
+    {
+      return false;
     }
 
     $shot->refresh();
 
-    if ($shot->state === ShotState::Failed)
-    {
-      return;
-    }
+    return $shot->state !== ShotState::Failed;
+  }
+
+  /**
+   * @param array<string, mixed> $metadata
+   */
+  private function rewriteAndLogAttempt(Shot $shot, JudgementResult $verdict, array $metadata, string $step): void
+  {
+    $log = $metadata['prompt_attempts'][$step] ?? [];
 
     // The first rewrite overwrites shots.prompt, so keep the planned prompt
     // here; every later rewrite must start from the scene as planned.
     $originalPrompt = (string) ($metadata['original_prompt'] ?? $shot->prompt);
     $metadata['original_prompt'] = $originalPrompt;
 
-    $rewritten = $this->agent->rewritePrompt([
-      'brief' => (string) $shot->brief?->prompt,
-      'original_prompt' => $originalPrompt,
-      'failed_scores' => $verdict->scores,
-      'reason' => $verdict->reason,
-      'previous_attempts' => $log,
-    ]);
+    $rewritten = $this->rewrite($shot, $verdict, $originalPrompt, $log);
 
     $log[] = [
       'prompt' => $shot->prompt,
@@ -84,7 +116,24 @@ class ShotStepRetry
       'prompt' => $rewritten,
       'metadata' => $metadata,
     ]);
+  }
 
+  /**
+   * @param list<array<string, mixed>> $previousAttempts
+   */
+  private function rewrite(Shot $shot, JudgementResult $verdict, string $originalPrompt, array $previousAttempts): string
+  {
+    return $this->agent->rewritePrompt([
+      'brief' => (string) $shot->brief?->prompt,
+      'original_prompt' => $originalPrompt,
+      'failed_scores' => $verdict->scores,
+      'reason' => $verdict->reason,
+      'previous_attempts' => $previousAttempts,
+    ]);
+  }
+
+  private function retryStep(Shot $shot, JudgementStage $stage, ?Batch $batch): void
+  {
     if ($stage === JudgementStage::Image)
     {
       $this->dispatch([
@@ -95,7 +144,12 @@ class ShotStepRetry
       return;
     }
 
-    $poll = app(ShotVideoSubmitter::class)->submit($shot, app(VideoProviderInterface::class));
+    $this->resubmitVideo($shot, $batch);
+  }
+
+  private function resubmitVideo(Shot $shot, ?Batch $batch): void
+  {
+    $poll = $this->submitter->submit($shot, $this->videos);
 
     if ($poll === null)
     {
