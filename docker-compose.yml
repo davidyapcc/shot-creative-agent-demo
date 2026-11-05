@@ -34,6 +34,15 @@ services:
       AWS_BUCKET: ${AWS_BUCKET:-shot-creative}
       AWS_ENDPOINT: http://minio:9000
       AWS_USE_PATH_STYLE_ENDPOINT: "true"
+      JUDGE_PROVIDER: ${JUDGE_PROVIDER:-replay}
+      JUDGE_MODEL: ${JUDGE_MODEL:-gemini-3.5-flash-lite}
+      JUDGE_GEMINI_MODEL: ${JUDGE_GEMINI_MODEL:-gemini-3.5-flash-lite}
+      JUDGE_OPENAI_MODEL: ${JUDGE_OPENAI_MODEL:-gpt-5.4-mini}
+      JUDGE_VIDEO_FPS: ${JUDGE_VIDEO_FPS:-6}
+      JUDGE_MAX_FRAMES: ${JUDGE_MAX_FRAMES:-48}
+      JUDGE_REQUESTS_PER_MINUTE: ${JUDGE_REQUESTS_PER_MINUTE:-10}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - .:/var/www/html
       # Container-local modules. npm install must not write Linux binaries over the host folder.
@@ -82,6 +91,15 @@ services:
       AWS_BUCKET: ${AWS_BUCKET:-shot-creative}
       AWS_ENDPOINT: http://minio:9000
       AWS_USE_PATH_STYLE_ENDPOINT: "true"
+      JUDGE_PROVIDER: ${JUDGE_PROVIDER:-replay}
+      JUDGE_MODEL: ${JUDGE_MODEL:-gemini-3.5-flash-lite}
+      JUDGE_GEMINI_MODEL: ${JUDGE_GEMINI_MODEL:-gemini-3.5-flash-lite}
+      JUDGE_OPENAI_MODEL: ${JUDGE_OPENAI_MODEL:-gpt-5.4-mini}
+      JUDGE_VIDEO_FPS: ${JUDGE_VIDEO_FPS:-6}
+      JUDGE_MAX_FRAMES: ${JUDGE_MAX_FRAMES:-48}
+      JUDGE_REQUESTS_PER_MINUTE: ${JUDGE_REQUESTS_PER_MINUTE:-10}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - .:/var/www/html
     depends_on:
