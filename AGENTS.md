@@ -7,7 +7,7 @@
 
 ## PHP style
 
-Match the house style by hand: 2-space indent, and every brace on its own line (classes, methods, closures, control structures, `catch`). The repo has no `pint.json`, so Pint's default preset reformats nearly every file, and `.editorconfig` still says 4 spaces. Keep both away from the codebase.
+Pint's Laravel preset (`pint.json`) is the standard. Run `composer format` on the PHP you touch, and commit only with `composer lint` green.
 
 ## Paid-call discipline
 
