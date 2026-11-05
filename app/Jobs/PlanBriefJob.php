@@ -5,59 +5,190 @@ declare(strict_types=1);
 namespace App\Jobs;
 
 use App\Contracts\AgentInterface;
+use App\DTOs\ShotPlan;
 use App\Enums\BriefState;
 use App\Enums\ShotState;
 use App\Events\ShotUpdated;
+use App\Exceptions\ProviderRateLimitedException;
 use App\Models\Brief;
 use App\Models\Shot;
 use App\Services\Budget;
+use App\Services\RateLimitHitCounter;
 use App\Traits\FailsBriefOnJobFailure;
+use App\Traits\RetriesRateLimitedAgent;
+use Closure;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\DB;
 
 class PlanBriefJob implements ShouldQueue
 {
     use FailsBriefOnJobFailure;
     use Queueable;
+    use RetriesRateLimitedAgent;
+
+    /**
+     * Ledger operation for the one paid planning call.
+     */
+    private const PLAN_OPERATION = 'planShots';
+
+    /**
+     * Brief metadata flag held while a worker's plan call is in flight.
+     */
+    private const CLAIM_KEY = 'planning_claimed';
 
     public function __construct(
         public readonly int $briefId,
     ) {}
 
-    public function handle(AgentInterface $agent, Budget $budget): void
+    public function handle(AgentInterface $agent, Budget $budget, ?RateLimitHitCounter $rateLimits = null): void
     {
+        $rateLimits ??= new RateLimitHitCounter;
         $brief = Brief::findOrFail($this->briefId);
 
-        $brief->transitionTo(BriefState::Planning);
+        if ($brief->state === BriefState::Pending) {
+            $brief->transitionTo(BriefState::Planning);
+        }
 
-        if (! $budget->chargeOrDegrade($brief, 'agent', 'generateStyleAnchor')) {
+        if ($brief->state !== BriefState::Planning) {
             return;
         }
 
-        $styleAnchor = $agent->generateStyleAnchor($brief->prompt);
-        $brief->update([
-            'style_anchor' => $styleAnchor,
-        ]);
+        try {
+            $this->plan($brief, $agent, $budget);
+        } catch (ProviderRateLimitedException $exception) {
+            $rateLimits->increment('agent');
 
-        if (! $budget->chargeOrDegrade($brief, 'agent', 'planShots')) {
+            throw $exception;
+        }
+    }
+
+    private function plan(Brief $brief, AgentInterface $agent, Budget $budget): void
+    {
+        if ($brief->shots()->doesntExist() && ! $this->writePlan($brief, $agent, $budget)) {
             return;
         }
 
-        $plannedShots = $agent->planShots($brief->prompt);
+        $brief->refresh();
 
-        foreach ($plannedShots as $shotData) {
-            $shot = Shot::create([
-                'brief_id' => $brief->id,
-                'sequence' => $shotData['sequence'],
-                'prompt' => $shotData['prompt'],
-                'state' => ShotState::Pending,
-            ]);
-
-            ShotUpdated::dispatch($shot);
+        if ($brief->state !== BriefState::Planning) {
+            return;
         }
 
         $brief->transitionTo(BriefState::Keyframes);
-
         ProcessKeyframesJob::dispatch($brief->id);
+    }
+
+    /**
+     * Charge, claim, call the agent once, then store the plan. False when
+     * nothing was stored: the budget stopped it, another worker holds the
+     * claim, or the brief failed during the call.
+     */
+    private function writePlan(Brief $brief, AgentInterface $agent, Budget $budget): bool
+    {
+        if (! $budget->chargeOrDegrade($brief, 'agent', self::PLAN_OPERATION)) {
+            return false;
+        }
+
+        if (! $this->claim($brief)) {
+            $budget->refund($brief, 'agent', self::PLAN_OPERATION);
+
+            return $brief->shots()->exists();
+        }
+
+        try {
+            $plan = $agent->planShots($brief->prompt);
+        } catch (ProviderRateLimitedException $exception) {
+            // A refused request spent no quota.
+            $this->releaseClaim($brief);
+            $budget->refund($brief, 'agent', self::PLAN_OPERATION);
+
+            throw $exception;
+        }
+
+        $shots = $this->savePlan($brief, $plan);
+
+        foreach ($shots ?? [] as $shot) {
+            ShotUpdated::dispatch($shot);
+        }
+
+        return $shots !== null;
+    }
+
+    /**
+     * Reserve the plan call under a row lock so a second worker does not pay for it.
+     */
+    private function claim(Brief $brief): bool
+    {
+        return $this->withLockedBrief($brief, function (Brief $locked): bool {
+            if ($locked->state !== BriefState::Planning
+                || $locked->shots()->exists()
+                || ($locked->metadata[self::CLAIM_KEY] ?? false) === true) {
+                return false;
+            }
+
+            $locked->update(['metadata' => [...$locked->metadata ?? [], self::CLAIM_KEY => true]]);
+
+            return true;
+        });
+    }
+
+    private function releaseClaim(Brief $brief): void
+    {
+        $this->withLockedBrief($brief, function (Brief $locked): void {
+            $locked->update(['metadata' => $this->withoutClaim($locked)]);
+        });
+    }
+
+    /**
+     * Store the anchor and shots together and clear the claim. Null when the
+     * brief failed while the call ran; the late plan is dropped.
+     *
+     * @return list<Shot>|null
+     */
+    private function savePlan(Brief $brief, ShotPlan $plan): ?array
+    {
+        return $this->withLockedBrief($brief, function (Brief $locked) use ($plan): ?array {
+            if ($locked->state !== BriefState::Planning) {
+                $locked->update(['metadata' => $this->withoutClaim($locked)]);
+
+                return null;
+            }
+
+            $locked->update([
+                'style_anchor' => $plan->styleAnchor,
+                'metadata' => $this->withoutClaim($locked),
+            ]);
+
+            return array_map(fn (array $shot): Shot => Shot::create([
+                'brief_id' => $locked->id,
+                'sequence' => $shot['sequence'],
+                'prompt' => $shot['prompt'],
+                'state' => ShotState::Pending,
+            ]), $plan->shots);
+        });
+    }
+
+    /**
+     * @template T
+     *
+     * @param  Closure(Brief): T  $callback
+     * @return T
+     */
+    private function withLockedBrief(Brief $brief, Closure $callback): mixed
+    {
+        return DB::transaction(function () use ($brief, $callback): mixed {
+            $locked = Brief::query()->whereKey($brief->id)->lockForUpdate()->firstOrFail();
+
+            return $callback($locked);
+        });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function withoutClaim(Brief $brief): array
+    {
+        return array_diff_key($brief->metadata ?? [], [self::CLAIM_KEY => true]);
     }
 }

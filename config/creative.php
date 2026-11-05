@@ -5,7 +5,14 @@ declare(strict_types=1);
 return [
     'agent' => [
         'provider' => env('AGENT_PROVIDER', 'mock'),
-        'model' => env('AGENT_MODEL', 'gemini-3.8-flash'),
+        // Unset uses the provider's entry in default_models.
+        'model' => env('AGENT_MODEL'),
+        'default_models' => [
+            'gemini' => 'gemini-3.8-flash',
+            'openai' => 'gpt-5.4-mini',
+            'cloudflare' => '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+        ],
+        'requests_per_minute' => (int) env('AGENT_REQUESTS_PER_MINUTE', 10),
     ],
     'judge' => [
         'provider' => env('JUDGE_PROVIDER', 'replay'),

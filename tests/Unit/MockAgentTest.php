@@ -19,23 +19,20 @@ class MockAgentTest extends TestCase
         $firstPlan = $agent->planShots($prompt);
         $secondPlan = $agent->planShots($prompt);
 
-        $this->assertCount(3, $firstPlan);
-        $this->assertSame($firstPlan, $secondPlan);
-        $this->assertSame(1, $firstPlan[0]['sequence']);
-        $this->assertSame(2, $firstPlan[1]['sequence']);
-        $this->assertSame(3, $firstPlan[2]['sequence']);
-        $this->assertStringContainsString('Tokyo', $firstPlan[0]['prompt']);
+        $this->assertCount(3, $firstPlan->shots);
+        $this->assertEquals($firstPlan, $secondPlan);
+        $this->assertSame([1, 2, 3], array_column($firstPlan->shots, 'sequence'));
+        $this->assertStringContainsString('Tokyo', $firstPlan->shots[0]['prompt']);
     }
 
-    public function test_mock_agent_generates_style_anchor(): void
+    public function test_mock_agent_plan_carries_the_style_anchor(): void
     {
         $agent = new MockAgent;
         $prompt = '15s product teaser, rainy Tokyo, neon';
 
-        $styleAnchor = $agent->generateStyleAnchor($prompt);
+        $plan = $agent->planShots($prompt);
 
-        $this->assertNotEmpty($styleAnchor);
-        $this->assertStringContainsString('Tokyo', $styleAnchor);
+        $this->assertStringContainsString('Tokyo', $plan->styleAnchor);
     }
 
     public function test_mock_rewrite_keeps_the_scene_and_does_not_repeat_a_failed_fix(): void

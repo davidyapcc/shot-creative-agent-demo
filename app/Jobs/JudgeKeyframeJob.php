@@ -64,7 +64,7 @@ class JudgeKeyframeJob implements ShouldQueue
             throw $exception;
         }
 
-        Judgement::create($verdict->toModelAttributes($shot->id, JudgementStage::Image));
+        $judgement = Judgement::create($verdict->toModelAttributes($shot->id, JudgementStage::Image));
 
         event(JudgeVerdictRecorded::fromVerdict(
             $this->briefId,
@@ -76,7 +76,7 @@ class JudgeKeyframeJob implements ShouldQueue
         ShotUpdated::dispatch($shot->refresh());
 
         if ($verdict->isFail()) {
-            $retry->afterFailure($shot, $verdict, JudgementStage::Image, $this->batch());
+            $retry->afterFailure($shot, $judgement, JudgementStage::Image, $this->batch());
         }
     }
 }

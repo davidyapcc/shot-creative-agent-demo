@@ -65,7 +65,7 @@ class JudgeVideoJob implements ShouldQueue
             throw $exception;
         }
 
-        Judgement::create($verdict->toModelAttributes($shot->id, JudgementStage::Video));
+        $judgement = Judgement::create($verdict->toModelAttributes($shot->id, JudgementStage::Video));
 
         event(JudgeVerdictRecorded::fromVerdict(
             $this->briefId,
@@ -80,7 +80,7 @@ class JudgeVideoJob implements ShouldQueue
             }
         } else {
             ShotUpdated::dispatch($shot->refresh());
-            $retry->afterFailure($shot, $verdict, JudgementStage::Video, $this->batch());
+            $retry->afterFailure($shot, $judgement, JudgementStage::Video, $this->batch());
         }
     }
 }

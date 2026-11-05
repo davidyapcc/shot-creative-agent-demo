@@ -4,19 +4,15 @@ declare(strict_types=1);
 
 namespace App\Contracts;
 
+use App\DTOs\ShotPlan;
+
 interface AgentInterface
 {
     /**
-     * Plan 2-3 shots from the brief prompt.
-     *
-     * @return array<int, array{sequence: int, prompt: string}>
+     * Plan 2-3 shots from the brief prompt, with the style anchor every
+     * keyframe shares.
      */
-    public function planShots(string $prompt): array;
-
-    /**
-     * Generate style anchor for the brief.
-     */
-    public function generateStyleAnchor(string $prompt): string;
+    public function planShots(string $prompt): ShotPlan;
 
     /**
      * Rewrite a failed prompt. Preserve the scene, simplify only the failing

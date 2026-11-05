@@ -49,9 +49,9 @@ class ReplayRetryTest extends TestCase
 
         // Shot 1's image retry costs 3 units (rewrite, regenerate, re-judge) and
         // Shot 2's video retry costs 4 (rewrite, submit, poll, re-judge), on top
-        // of the 18 a brief with no retries uses.
-        $this->assertSame(25, $brief->budget_used);
-        $this->assertCount(25, $brief->metadata['budget_ledger']);
+        // of the 17 a brief with no retries uses.
+        $this->assertSame(24, $brief->budget_used);
+        $this->assertCount(24, $brief->metadata['budget_ledger']);
         $this->assertSame(
             ['agent', 'audio', 'image', 'judge', 'video'],
             collect($brief->metadata['budget_ledger'])->pluck('provider')->unique()->sort()->values()->all(),

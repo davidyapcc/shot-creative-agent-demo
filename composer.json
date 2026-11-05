@@ -12,7 +12,8 @@
         "laravel/reverb": "^1.12",
         "laravel/tinker": "^3.0",
         "league/flysystem-aws-s3-v3": "^3.35",
-        "predis/predis": "^3.7"
+        "predis/predis": "^3.7",
+        "prism-php/prism": "^0.102.0"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

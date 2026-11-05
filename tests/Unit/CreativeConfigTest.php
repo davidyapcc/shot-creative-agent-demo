@@ -15,6 +15,7 @@ class CreativeConfigTest extends TestCase
 {
     private const DRIVER_ENV_VARS = [
         'AGENT_PROVIDER',
+        'AGENT_MODEL',
         'JUDGE_PROVIDER',
         'IMAGE_PROVIDER',
         'VIDEO_PROVIDER',
@@ -32,9 +33,15 @@ class CreativeConfigTest extends TestCase
 
     public function test_creative_config_defaults_to_mock_and_replay_drivers(): void
     {
+        // The host .env sets AGENT_MODEL; the default is what an unset value gives.
+        unset($_SERVER['AGENT_MODEL'], $_ENV['AGENT_MODEL']);
+        putenv('AGENT_MODEL');
+
         $config = $this->loadCreativeConfig();
 
         $this->assertSame('mock', $config['agent']['provider']);
+        $this->assertNull($config['agent']['model']);
+        $this->assertSame(10, $config['agent']['requests_per_minute']);
         $this->assertSame('replay', $config['judge']['provider']);
         $this->assertSame('gemini-3.5-flash-lite', $config['judge']['gemini_model']);
         $this->assertSame('gpt-5.4-mini', $config['judge']['openai_model']);
