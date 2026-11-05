@@ -17,7 +17,7 @@ Every provider call spends brief budget. These rules each come from a bug alread
 - **Re-check after the call.** The budget stop can fail a shot while its job is mid-call. Advance with `Shot::advanceUnlessStopped`, which locks the row and drops the late result.
 - **Claim one-shot work before calling.** Reserve it under a row lock (as `GenerateAudioJob::claim` does), so a retry or an overlapping job never pays twice.
 - **Fail early.** Once no shot can pass, fail the brief before the next stage spends anything.
-- `Budget::refund` reverses only the latest ledger entry, and logs a warning otherwise.
+- `Budget::refund` reverses only the latest ledger entry, and logs a warning otherwise. Shot steps run in parallel, so refund them with `Budget::refundShotStep`, which matches the entry by shot id.
 - `shots.prompt` holds the latest rewrite; rewrites read the planned scene from `metadata['original_prompt']`.
 - `shots.attempts` counts every generation, image and video together.
 

@@ -10,7 +10,7 @@ use RuntimeException;
 
 class JudgeHttp
 {
-    private const TIMEOUT_SECONDS = 50;
+    private const TIMEOUT_SECONDS = 45;
 
     /**
      * @param  array<string, string>  $headers

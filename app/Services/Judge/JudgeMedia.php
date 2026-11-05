@@ -15,7 +15,7 @@ class JudgeMedia
 {
     public const MAX_INLINE_BYTES = 10 * 1024 * 1024;
 
-    private const FFMPEG_TIMEOUT_SECONDS = 45;
+    private const FFMPEG_TIMEOUT_SECONDS = 30;
 
     public function read(string $path): string
     {

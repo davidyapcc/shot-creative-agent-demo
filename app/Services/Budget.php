@@ -22,9 +22,9 @@ class Budget
     /**
      * Record one provider call. Free and mock calls cost one unit.
      */
-    public function charge(Brief $brief, string $provider, string $operation): void
+    public function charge(Brief $brief, string $provider, string $operation, ?int $shotId = null): void
     {
-        DB::transaction(function () use ($brief, $provider, $operation): void {
+        DB::transaction(function () use ($brief, $provider, $operation, $shotId): void {
             $locked = Brief::query()->whereKey($brief->id)->lockForUpdate()->firstOrFail();
             $cap = (int) config('creative.budget_cap');
 
@@ -34,11 +34,12 @@ class Budget
 
             $metadata = $locked->metadata ?? [];
             $ledger = $metadata['budget_ledger'] ?? [];
-            $ledger[] = [
+            $entry = [
                 'provider' => $provider,
                 'operation' => $operation,
                 'cost' => self::UNIT_COST,
             ];
+            $ledger[] = $shotId === null ? $entry : [...$entry, 'shot_id' => $shotId];
             $metadata['budget_ledger'] = $ledger;
 
             $locked->update([
@@ -51,10 +52,10 @@ class Budget
     /**
      * Meter the call, or stop the brief when the cap is already reached.
      */
-    public function chargeOrDegrade(Brief $brief, string $provider, string $operation): bool
+    public function chargeOrDegrade(Brief $brief, string $provider, string $operation, ?int $shotId = null): bool
     {
         try {
-            $this->charge($brief, $provider, $operation);
+            $this->charge($brief, $provider, $operation, $shotId);
         } catch (BudgetExceededException) {
             $this->completion->finish($brief);
 
@@ -79,7 +80,7 @@ class Budget
             return false;
         }
 
-        if ($shot->brief !== null && ! $this->chargeOrDegrade($shot->brief, $provider, $operation)) {
+        if ($shot->brief !== null && ! $this->chargeOrDegrade($shot->brief, $provider, $operation, $shot->id)) {
             return false;
         }
 
@@ -126,5 +127,67 @@ class Budget
         });
 
         $brief->refresh();
+    }
+
+    /**
+     * Give back one shot step's charge when the provider refused it. Shot steps
+     * run in parallel, so another shot's charge may have landed since; this
+     * reverses the latest entry for this shot, wherever it sits in the ledger.
+     */
+    public function refundShotStep(Shot $shot, string $provider, string $operation): void
+    {
+        $shot->loadMissing('brief');
+
+        if ($shot->brief === null) {
+            return;
+        }
+
+        DB::transaction(function () use ($shot, $provider, $operation): void {
+            $locked = Brief::query()->whereKey($shot->brief_id)->lockForUpdate()->firstOrFail();
+            $metadata = $locked->metadata ?? [];
+            $ledger = $metadata['budget_ledger'] ?? [];
+            $index = $this->latestShotEntry($ledger, $shot->id, $provider, $operation);
+
+            if ($index === null || $locked->budget_used < self::UNIT_COST) {
+                Log::warning('Budget refund skipped: no ledger entry for this shot step.', [
+                    'brief_id' => $shot->brief_id,
+                    'shot_id' => $shot->id,
+                    'provider' => $provider,
+                    'operation' => $operation,
+                ]);
+
+                return;
+            }
+
+            $metadata['budget_ledger'] = array_values(array_filter(
+                $ledger,
+                fn (int $key): bool => $key !== $index,
+                ARRAY_FILTER_USE_KEY,
+            ));
+
+            $locked->update([
+                'budget_used' => $locked->budget_used - self::UNIT_COST,
+                'metadata' => $metadata,
+            ]);
+        });
+
+        $shot->brief->refresh();
+    }
+
+    /**
+     * @param  array<int, mixed>  $ledger
+     */
+    private function latestShotEntry(array $ledger, int $shotId, string $provider, string $operation): ?int
+    {
+        foreach (array_reverse($ledger, true) as $index => $entry) {
+            if (is_array($entry)
+                && ($entry['shot_id'] ?? null) === $shotId
+                && $entry['provider'] === $provider
+                && $entry['operation'] === $operation) {
+                return $index;
+            }
+        }
+
+        return null;
     }
 }

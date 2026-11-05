@@ -19,10 +19,12 @@ use App\Models\Shot;
 use App\Services\Budget;
 use App\Services\RateLimitHitCounter;
 use App\Services\ShotStepRetry;
+use Closure;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Queue\Middleware\RateLimited;
 use Illuminate\Queue\Middleware\ThrottlesExceptions;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
 use ReflectionProperty;
 use RuntimeException;
@@ -46,6 +48,8 @@ class JudgeRateLimitTest extends TestCase
             $job = new $class(1, 1);
 
             $this->assertSame('judge', $class::RATE_LIMITER);
+            $this->assertTrue($job->failOnTimeout);
+            $this->assertLessThan((int) config('queue.connections.redis.retry_after'), $job->timeout);
             $middleware = $job->middleware();
             $this->assertCount(2, $middleware);
 
@@ -106,7 +110,7 @@ class JudgeRateLimitTest extends TestCase
         $brief->refresh();
         $this->assertSame(1, $brief->budget_used);
         $this->assertSame([
-            ['provider' => 'judge', 'operation' => 'judgeImage', 'cost' => 1],
+            ['provider' => 'judge', 'operation' => 'judgeImage', 'cost' => 1, 'shot_id' => $shot->id],
         ], $brief->metadata['budget_ledger']);
         $this->assertSame(1, app(RateLimitHitCounter::class)->count('judge'));
         $this->assertSame(1, Judgement::query()->count());
@@ -148,10 +152,85 @@ class JudgeRateLimitTest extends TestCase
         $brief->refresh();
         $this->assertSame(1, $brief->budget_used);
         $this->assertSame([
-            ['provider' => 'judge', 'operation' => 'judgeVideo', 'cost' => 1],
+            ['provider' => 'judge', 'operation' => 'judgeVideo', 'cost' => 1, 'shot_id' => $shot->id],
         ], $brief->metadata['budget_ledger']);
         $this->assertSame(1, app(RateLimitHitCounter::class)->count('judge'));
         $this->assertSame(ShotState::Done, $shot->refresh()->state);
+    }
+
+    public function test_a_429_refunds_this_shots_charge_when_another_shot_charged_in_between(): void
+    {
+        // Arrange
+        $brief = Brief::create([
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+            'state' => BriefState::Keyframes,
+        ]);
+        $shot = Shot::create([
+            'brief_id' => $brief->id,
+            'sequence' => 1,
+            'prompt' => 'Shot 1: neon alley',
+            'state' => ShotState::JudgingImage,
+            'keyframe_path' => 'keyframes/shot_1.png',
+        ]);
+        $otherShot = Shot::create([
+            'brief_id' => $brief->id,
+            'sequence' => 2,
+            'prompt' => 'Shot 2: rooftop',
+            'state' => ShotState::JudgingImage,
+            'keyframe_path' => 'keyframes/shot_2.png',
+        ]);
+        $judge = $this->judgeThatLimitsAfter(fn () => app(Budget::class)->chargeShotStep($otherShot, 'judge', 'judgeImage'));
+
+        // Act
+        try {
+            (new JudgeKeyframeJob($shot->id, $brief->id))
+                ->handle($judge, app(ShotStepRetry::class), app(Budget::class), app(RateLimitHitCounter::class));
+            $this->fail('The rate-limit error should escape the job.');
+        } catch (ProviderRateLimitedException) {
+            // Expected.
+        }
+
+        // Assert
+        $brief->refresh();
+        $this->assertSame(1, $brief->budget_used);
+        $this->assertSame([
+            ['provider' => 'judge', 'operation' => 'judgeImage', 'cost' => 1, 'shot_id' => $otherShot->id],
+        ], $brief->metadata['budget_ledger']);
+    }
+
+    public function test_rate_limit_hits_survive_a_cache_flush(): void
+    {
+        // Arrange
+        $counter = app(RateLimitHitCounter::class);
+        $counter->increment('judge');
+        $counter->increment('judge');
+
+        // Act
+        Cache::flush();
+
+        // Assert
+        $this->assertSame(2, $counter->count('judge'));
+        $this->assertSame(0, $counter->count('audio'));
+    }
+
+    private function judgeThatLimitsAfter(Closure $during): JudgeInterface
+    {
+        return new class($during) implements JudgeInterface
+        {
+            public function __construct(private readonly Closure $during) {}
+
+            public function judgeImage(string $imagePath, string $prompt, ?string $styleAnchor = null): JudgementResult
+            {
+                ($this->during)();
+
+                throw new ProviderRateLimitedException('Gemini judge returned HTTP 429.');
+            }
+
+            public function judgeVideo(string $videoPath, string $prompt, ?string $styleAnchor = null): JudgementResult
+            {
+                return $this->judgeImage($videoPath, $prompt, $styleAnchor);
+            }
+        };
     }
 
     private function throttle(ShouldQueue $job): ThrottlesExceptions

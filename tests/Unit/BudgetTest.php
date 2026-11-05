@@ -80,6 +80,42 @@ class BudgetTest extends TestCase
               && $context['operation'] === 'generateVoiceover');
     }
 
+    public function test_shot_step_refund_skips_and_warns_when_the_shot_has_no_matching_charge(): void
+    {
+        // Arrange
+        Log::spy();
+
+        $brief = Brief::create([
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+            'state' => BriefState::Keyframes,
+        ]);
+        $shot = Shot::create([
+            'brief_id' => $brief->id,
+            'sequence' => 1,
+            'prompt' => 'Shot 1: neon alley',
+            'state' => ShotState::JudgingImage,
+        ]);
+        $otherShot = Shot::create([
+            'brief_id' => $brief->id,
+            'sequence' => 2,
+            'prompt' => 'Shot 2: rooftop',
+            'state' => ShotState::JudgingImage,
+        ]);
+
+        $budget = app(Budget::class);
+        $budget->chargeShotStep($otherShot, 'judge', 'judgeImage');
+
+        // Act
+        $budget->refundShotStep($shot, 'judge', 'judgeImage');
+
+        // Assert
+        $this->assertSame(1, $brief->refresh()->budget_used);
+        Log::shouldHaveReceived('warning')
+            ->once()
+            ->withArgs(fn (string $message, array $context): bool => str_contains($message, 'refund')
+              && $context['shot_id'] === $shot->id);
+    }
+
     public function test_cap_during_planning_stops_the_next_agent_call_and_marks_the_brief_degraded(): void
     {
         config(['creative.budget_cap' => 1]);

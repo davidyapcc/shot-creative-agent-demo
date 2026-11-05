@@ -26,6 +26,19 @@ trait RetriesRateLimitedJudge
     private const THROTTLE_BACKOFF_MINUTES = 1;
 
     /**
+     * Seconds one judgement may run. It stays under the queue's 90s retry_after
+     * so the queue never hands a running judgement to a second worker, and above
+     * the ffmpeg and HTTP timeouts a video judgement can spend back to back.
+     */
+    public int $timeout = 85;
+
+    /**
+     * A timed-out run already took its charge, so a retry would pay twice.
+     * Fail it instead.
+     */
+    public bool $failOnTimeout = true;
+
+    /**
      * @return list<object>
      */
     public function middleware(): array
@@ -52,9 +65,7 @@ trait RetriesRateLimitedJudge
         RateLimitHitCounter $rateLimits,
         string $operation,
     ): void {
-        if ($shot->brief !== null) {
-            $budget->refund($shot->brief, 'judge', $operation);
-        }
+        $budget->refundShotStep($shot, 'judge', $operation);
 
         $rateLimits->increment('judge');
     }
