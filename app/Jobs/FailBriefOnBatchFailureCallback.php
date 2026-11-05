@@ -10,16 +10,14 @@ use Throwable;
 
 class FailBriefOnBatchFailureCallback
 {
-  public function __construct(
-    public readonly int $briefId,
-  )
-  {
-  }
+    public function __construct(
+        public readonly int $briefId,
+    ) {}
 
-  public function __invoke(Batch $batch, ?Throwable $exception = null): void
-  {
-    $brief = Brief::find($this->briefId);
+    public function __invoke(Batch $batch, ?Throwable $exception = null): void
+    {
+        $brief = Brief::find($this->briefId);
 
-    $brief?->failWithInFlightShots();
-  }
+        $brief?->failWithInFlightShots();
+    }
 }

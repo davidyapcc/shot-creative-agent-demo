@@ -6,10 +6,8 @@ namespace App\DTOs;
 
 class AudioResult
 {
-  public function __construct(
-    public readonly string $voiceover,
-    public readonly string $soundEffect,
-  )
-  {
-  }
+    public function __construct(
+        public readonly string $voiceover,
+        public readonly string $soundEffect,
+    ) {}
 }

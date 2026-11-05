@@ -31,113 +31,110 @@ use Tests\TestCase;
  */
 class BudgetStopRaceTest extends TestCase
 {
-  use RefreshDatabase;
+    use RefreshDatabase;
 
-  protected function setUp(): void
-  {
-    parent::setUp();
-
-    Storage::fake('s3');
-    Bus::fake();
-  }
-
-  public function test_late_keyframe_does_not_revive_a_shot_the_budget_stop_failed(): void
-  {
-    // Arrange
-    [$brief, $shot] = $this->briefWithShot(BriefState::Keyframes, ShotState::Pending);
-
-    $images = $this->createMock(ImageProviderInterface::class);
-    $images->method('generateImage')->willReturnCallback(function () use ($shot, $brief): string
+    protected function setUp(): void
     {
-      $this->stopForBudget($brief, $shot);
+        parent::setUp();
 
-      return 'png-bytes';
-    });
+        Storage::fake('s3');
+        Bus::fake();
+    }
 
-    // Act
-    (new GenerateKeyframeJob($shot->id, $brief->id))->handle($images, app(Budget::class));
-
-    // Assert
-    $this->assertSame(ShotState::Failed, $shot->refresh()->state);
-    $this->assertSame(BriefState::Muxing, $brief->refresh()->state);
-  }
-
-  public function test_late_render_does_not_throw_or_queue_a_judge_after_the_budget_stop(): void
-  {
-    // Arrange
-    [$brief, $shot] = $this->briefWithShot(BriefState::Rendering, ShotState::GeneratingVideo);
-
-    $videos = $this->createMock(VideoProviderInterface::class);
-    $videos->method('poll')->willReturnCallback(function () use ($shot, $brief): VideoRenderResult
+    public function test_late_keyframe_does_not_revive_a_shot_the_budget_stop_failed(): void
     {
-      $this->stopForBudget($brief, $shot);
+        // Arrange
+        [$brief, $shot] = $this->briefWithShot(BriefState::Keyframes, ShotState::Pending);
 
-      return VideoRenderResult::completed('mp4-bytes');
-    });
+        $images = $this->createMock(ImageProviderInterface::class);
+        $images->method('generateImage')->willReturnCallback(function () use ($shot, $brief): string {
+            $this->stopForBudget($brief, $shot);
 
-    // Act
-    (new PollVideoRenderJob($shot->id, 'render-1', $brief->id))->handle($videos, app(Budget::class));
+            return 'png-bytes';
+        });
 
-    // Assert
-    $this->assertSame(ShotState::Failed, $shot->refresh()->state);
-    $this->assertSame(BriefState::Muxing, $brief->refresh()->state);
-    Bus::assertNotDispatched(JudgeVideoJob::class);
-  }
+        // Act
+        (new GenerateKeyframeJob($shot->id, $brief->id))->handle($images, app(Budget::class));
 
-  public function test_late_passing_video_verdict_does_not_revive_a_shot_the_budget_stop_failed(): void
-  {
-    // Arrange
-    [$brief, $shot] = $this->briefWithShot(BriefState::Rendering, ShotState::JudgingVideo);
+        // Assert
+        $this->assertSame(ShotState::Failed, $shot->refresh()->state);
+        $this->assertSame(BriefState::Muxing, $brief->refresh()->state);
+    }
 
-    $judge = $this->createMock(JudgeInterface::class);
-    $judge->method('judgeVideo')->willReturnCallback(function () use ($shot, $brief): JudgementResult
+    public function test_late_render_does_not_throw_or_queue_a_judge_after_the_budget_stop(): void
     {
-      $this->stopForBudget($brief, $shot);
+        // Arrange
+        [$brief, $shot] = $this->briefWithShot(BriefState::Rendering, ShotState::GeneratingVideo);
 
-      return new JudgementResult(['prompt_adherence' => 5, 'temporal_consistency' => 5]);
-    });
+        $videos = $this->createMock(VideoProviderInterface::class);
+        $videos->method('poll')->willReturnCallback(function () use ($shot, $brief): VideoRenderResult {
+            $this->stopForBudget($brief, $shot);
 
-    // Act
-    (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, $this->app->make(ShotStepRetry::class, ['agent' => $this->createMock(AgentInterface::class)]), app(Budget::class));
+            return VideoRenderResult::completed('mp4-bytes');
+        });
 
-    // Assert
-    $this->assertSame(ShotState::Failed, $shot->refresh()->state);
-    $this->assertSame(BriefState::Muxing, $brief->refresh()->state);
-  }
+        // Act
+        (new PollVideoRenderJob($shot->id, 'render-1', $brief->id))->handle($videos, app(Budget::class));
 
-  /**
-   * @return array{0: Brief, 1: Shot}
-   */
-  private function briefWithShot(BriefState $briefState, ShotState $shotState): array
-  {
-    $brief = Brief::create([
-      'prompt' => '15s product teaser',
-      'state' => $briefState,
-    ]);
+        // Assert
+        $this->assertSame(ShotState::Failed, $shot->refresh()->state);
+        $this->assertSame(BriefState::Muxing, $brief->refresh()->state);
+        Bus::assertNotDispatched(JudgeVideoJob::class);
+    }
 
-    $shot = Shot::create([
-      'brief_id' => $brief->id,
-      'sequence' => 1,
-      'prompt' => 'Shot 1 prompt',
-      'state' => $shotState,
-      'keyframe_path' => 'keyframes/shot_1.png',
-      'video_path' => 'videos/shot_1.mp4',
-    ]);
+    public function test_late_passing_video_verdict_does_not_revive_a_shot_the_budget_stop_failed(): void
+    {
+        // Arrange
+        [$brief, $shot] = $this->briefWithShot(BriefState::Rendering, ShotState::JudgingVideo);
 
-    return [$brief, $shot];
-  }
+        $judge = $this->createMock(JudgeInterface::class);
+        $judge->method('judgeVideo')->willReturnCallback(function () use ($shot, $brief): JudgementResult {
+            $this->stopForBudget($brief, $shot);
 
-  /**
-   * What DegradedCompletion leaves behind while the provider call is in flight.
-   */
-  private function stopForBudget(Brief $brief, Shot $shot): void
-  {
-    Brief::query()->whereKey($brief->id)->update([
-      'state' => BriefState::Muxing->value,
-      'metadata' => json_encode(['budget_exhausted' => true]),
-    ]);
-    Shot::query()->whereKey($shot->id)->update([
-      'state' => ShotState::Failed->value,
-    ]);
-  }
+            return new JudgementResult(['prompt_adherence' => 5, 'temporal_consistency' => 5]);
+        });
+
+        // Act
+        (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, $this->app->make(ShotStepRetry::class, ['agent' => $this->createMock(AgentInterface::class)]), app(Budget::class));
+
+        // Assert
+        $this->assertSame(ShotState::Failed, $shot->refresh()->state);
+        $this->assertSame(BriefState::Muxing, $brief->refresh()->state);
+    }
+
+    /**
+     * @return array{0: Brief, 1: Shot}
+     */
+    private function briefWithShot(BriefState $briefState, ShotState $shotState): array
+    {
+        $brief = Brief::create([
+            'prompt' => '15s product teaser',
+            'state' => $briefState,
+        ]);
+
+        $shot = Shot::create([
+            'brief_id' => $brief->id,
+            'sequence' => 1,
+            'prompt' => 'Shot 1 prompt',
+            'state' => $shotState,
+            'keyframe_path' => 'keyframes/shot_1.png',
+            'video_path' => 'videos/shot_1.mp4',
+        ]);
+
+        return [$brief, $shot];
+    }
+
+    /**
+     * What DegradedCompletion leaves behind while the provider call is in flight.
+     */
+    private function stopForBudget(Brief $brief, Shot $shot): void
+    {
+        Brief::query()->whereKey($brief->id)->update([
+            'state' => BriefState::Muxing->value,
+            'metadata' => json_encode(['budget_exhausted' => true]),
+        ]);
+        Shot::query()->whereKey($shot->id)->update([
+            'state' => ShotState::Failed->value,
+        ]);
+    }
 }

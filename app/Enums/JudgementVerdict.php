@@ -6,6 +6,6 @@ namespace App\Enums;
 
 enum JudgementVerdict: string
 {
-  case Pass = 'pass';
-  case Fail = 'fail';
+    case Pass = 'pass';
+    case Fail = 'fail';
 }

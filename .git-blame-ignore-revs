@@ -1,0 +1,3 @@
+# Formatting-only commits; git blame skips them via blame.ignoreRevsFile (GitHub reads this file automatically).
+# style: adopt Pint's Laravel preset
+47091e1322a0f807628a3fb62212ee2c823e9a2b

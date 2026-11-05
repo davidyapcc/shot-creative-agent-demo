@@ -9,20 +9,20 @@ use Illuminate\Database\Eloquent\Model;
 
 class EvalRun extends Model
 {
-  use HasFactory;
+    use HasFactory;
 
-  protected $fillable = [
-    'judge_driver',
-    'dataset',
-    'metrics',
-    'results',
-  ];
-
-  protected function casts(): array
-  {
-    return [
-      'metrics' => 'array',
-      'results' => 'array',
+    protected $fillable = [
+        'judge_driver',
+        'dataset',
+        'metrics',
+        'results',
     ];
-  }
+
+    protected function casts(): array
+    {
+        return [
+            'metrics' => 'array',
+            'results' => 'array',
+        ];
+    }
 }

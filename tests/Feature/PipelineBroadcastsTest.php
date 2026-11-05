@@ -22,11 +22,11 @@ use App\Jobs\GenerateKeyframeJob;
 use App\Jobs\JudgeKeyframeJob;
 use App\Jobs\JudgeVideoJob;
 use App\Jobs\PlanBriefJob;
-use App\Services\Budget;
 use App\Jobs\PollVideoRenderJob;
 use App\Jobs\ProcessKeyframesJob;
 use App\Models\Brief;
 use App\Models\Shot;
+use App\Services\Budget;
 use App\Services\ShotStepRetry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
@@ -37,188 +37,184 @@ use Tests\TestCase;
 
 class PipelineBroadcastsTest extends TestCase
 {
-  use RefreshDatabase;
+    use RefreshDatabase;
 
-  public function test_plan_brief_dispatches_shot_updated_for_created_shots(): void
-  {
-    Queue::fake([ProcessKeyframesJob::class]);
-    Event::fake([ShotUpdated::class, BriefStateChanged::class]);
-
-    $brief = Brief::create([
-      'prompt' => '15s product teaser, rainy Tokyo, neon',
-      'state' => BriefState::Pending,
-    ]);
-
-    $agent = app(AgentInterface::class);
-    (new PlanBriefJob($brief->id))->handle($agent, app(Budget::class));
-
-    Event::assertDispatched(ShotUpdated::class, 3);
-  }
-
-  public function test_generate_keyframe_dispatches_shot_updated_with_keyframe(): void
-  {
-    Storage::fake('s3');
-    Event::fake([ShotUpdated::class]);
-
-    $brief = Brief::create([
-      'prompt' => '15s product teaser, rainy Tokyo, neon',
-      'state' => BriefState::Keyframes,
-      'style_anchor' => 'cinematic, neon rain',
-    ]);
-
-    $shot = Shot::create([
-      'brief_id' => $brief->id,
-      'sequence' => 1,
-      'prompt' => 'Neon alley reflection',
-      'state' => ShotState::Pending,
-    ]);
-
-    $imageProvider = app(ImageProviderInterface::class);
-    (new GenerateKeyframeJob($shot->id, $brief->id))->handle($imageProvider, app(Budget::class));
-
-    Event::assertDispatched(ShotUpdated::class, function (ShotUpdated $event) use ($shot): bool
+    public function test_plan_brief_dispatches_shot_updated_for_created_shots(): void
     {
-      return $event->shot->id === $shot->id
-        && $event->shot->keyframe_path !== null
-        && $event->shot->state === ShotState::JudgingImage;
-    });
-  }
+        Queue::fake([ProcessKeyframesJob::class]);
+        Event::fake([ShotUpdated::class, BriefStateChanged::class]);
 
-  public function test_judge_keyframe_dispatches_judge_verdict_recorded_with_failure_tag(): void
-  {
-    Event::fake([JudgeVerdictRecorded::class, ShotUpdated::class, BriefStateChanged::class]);
+        $brief = Brief::create([
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+            'state' => BriefState::Pending,
+        ]);
 
-    $brief = Brief::create([
-      'prompt' => '15s product teaser, rainy Tokyo, neon',
-      'state' => BriefState::Keyframes,
-      'style_anchor' => 'cinematic, neon rain',
-    ]);
+        $agent = app(AgentInterface::class);
+        (new PlanBriefJob($brief->id))->handle($agent, app(Budget::class));
 
-    $shot = Shot::create([
-      'brief_id' => $brief->id,
-      'sequence' => 1,
-      'prompt' => 'Neon alley reflection',
-      'state' => ShotState::JudgingImage,
-      'keyframe_path' => 'keyframes/test.png',
-    ]);
+        Event::assertDispatched(ShotUpdated::class, 3);
+    }
 
-    $judge = $this->createMock(JudgeInterface::class);
-    $judge->expects($this->once())
-      ->method('judgeImage')
-      ->willReturn(new JudgementResult(
-        scores: ['prompt_adherence' => 2, 'anatomy' => 1],
-        hardFailTags: ['anatomy'],
-        reason: 'Hand distorted',
-        verdict: JudgementVerdict::Fail,
-      ));
+    public function test_generate_keyframe_dispatches_shot_updated_with_keyframe(): void
+    {
+        Storage::fake('s3');
+        Event::fake([ShotUpdated::class]);
 
-    Bus::fake([GenerateKeyframeJob::class, JudgeKeyframeJob::class]);
+        $brief = Brief::create([
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+            'state' => BriefState::Keyframes,
+            'style_anchor' => 'cinematic, neon rain',
+        ]);
 
-    (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(Budget::class));
+        $shot = Shot::create([
+            'brief_id' => $brief->id,
+            'sequence' => 1,
+            'prompt' => 'Neon alley reflection',
+            'state' => ShotState::Pending,
+        ]);
 
-    Event::assertDispatched(
-      JudgeVerdictRecorded::class,
-      function (JudgeVerdictRecorded $event) use ($brief, $shot): bool
-      {
-        $stage = $event->stage instanceof JudgementStage ? $event->stage->value : $event->stage;
-        $verdict = $event->verdict instanceof JudgementVerdict ? $event->verdict->value : $event->verdict;
+        $imageProvider = app(ImageProviderInterface::class);
+        (new GenerateKeyframeJob($shot->id, $brief->id))->handle($imageProvider, app(Budget::class));
 
-        return $event->briefId === $brief->id
-          && $event->shotId === $shot->id
-          && $stage === 'image'
-          && $verdict === 'fail'
-          && $event->hardFailTags === ['anatomy'];
-      }
-    );
-    Event::assertDispatched(ShotUpdated::class);
-  }
+        Event::assertDispatched(ShotUpdated::class, function (ShotUpdated $event) use ($shot): bool {
+            return $event->shot->id === $shot->id
+              && $event->shot->keyframe_path !== null
+              && $event->shot->state === ShotState::JudgingImage;
+        });
+    }
 
-  public function test_poll_video_render_dispatches_video_progress_when_pending(): void
-  {
-    Event::fake([VideoProgressUpdated::class, ShotUpdated::class]);
+    public function test_judge_keyframe_dispatches_judge_verdict_recorded_with_failure_tag(): void
+    {
+        Event::fake([JudgeVerdictRecorded::class, ShotUpdated::class, BriefStateChanged::class]);
 
-    $brief = Brief::create([
-      'prompt' => '15s product teaser, rainy Tokyo, neon',
-      'state' => BriefState::Rendering,
-    ]);
+        $brief = Brief::create([
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+            'state' => BriefState::Keyframes,
+            'style_anchor' => 'cinematic, neon rain',
+        ]);
 
-    $shot = Shot::create([
-      'brief_id' => $brief->id,
-      'sequence' => 1,
-      'prompt' => 'Neon alley reflection',
-      'state' => ShotState::GeneratingVideo,
-    ]);
+        $shot = Shot::create([
+            'brief_id' => $brief->id,
+            'sequence' => 1,
+            'prompt' => 'Neon alley reflection',
+            'state' => ShotState::JudgingImage,
+            'keyframe_path' => 'keyframes/test.png',
+        ]);
 
-    $videoProvider = $this->createMock(VideoProviderInterface::class);
-    $videoProvider->expects($this->once())
-      ->method('poll')
-      ->willReturn(VideoRenderResult::pending(45));
+        $judge = $this->createMock(JudgeInterface::class);
+        $judge->expects($this->once())
+            ->method('judgeImage')
+            ->willReturn(new JudgementResult(
+                scores: ['prompt_adherence' => 2, 'anatomy' => 1],
+                hardFailTags: ['anatomy'],
+                reason: 'Hand distorted',
+                verdict: JudgementVerdict::Fail,
+            ));
 
-    (new PollVideoRenderJob($shot->id, 'render_123', $brief->id))->handle($videoProvider, app(Budget::class));
+        Bus::fake([GenerateKeyframeJob::class, JudgeKeyframeJob::class]);
 
-    Event::assertDispatched(
-      VideoProgressUpdated::class,
-      function (VideoProgressUpdated $event) use ($brief, $shot): bool
-      {
-        return $event->briefId === $brief->id
-          && $event->shotId === $shot->id
-          && $event->progress === 45;
-      }
-    );
+        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(Budget::class));
 
-    $shot->refresh();
-    $this->assertSame(45, $shot->metadata['video_progress']);
+        Event::assertDispatched(
+            JudgeVerdictRecorded::class,
+            function (JudgeVerdictRecorded $event) use ($brief, $shot): bool {
+                $stage = $event->stage instanceof JudgementStage ? $event->stage->value : $event->stage;
+                $verdict = $event->verdict instanceof JudgementVerdict ? $event->verdict->value : $event->verdict;
 
-    $this->getJson("/briefs/{$brief->id}")
-      ->assertOk()
-      ->assertJsonPath('data.brief.shots.0.metadata.video_progress', 45);
-  }
+                return $event->briefId === $brief->id
+                  && $event->shotId === $shot->id
+                  && $stage === 'image'
+                  && $verdict === 'fail'
+                  && $event->hardFailTags === ['anatomy'];
+            }
+        );
+        Event::assertDispatched(ShotUpdated::class);
+    }
 
-  public function test_judge_video_dispatches_judge_verdict_recorded_with_failure_tag(): void
-  {
-    Event::fake([JudgeVerdictRecorded::class, ShotUpdated::class, BriefStateChanged::class]);
+    public function test_poll_video_render_dispatches_video_progress_when_pending(): void
+    {
+        Event::fake([VideoProgressUpdated::class, ShotUpdated::class]);
 
-    $brief = Brief::create([
-      'prompt' => '15s product teaser, rainy Tokyo, neon',
-      'state' => BriefState::Rendering,
-    ]);
+        $brief = Brief::create([
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+            'state' => BriefState::Rendering,
+        ]);
 
-    $shot = Shot::create([
-      'brief_id' => $brief->id,
-      'sequence' => 1,
-      'prompt' => 'Neon alley reflection',
-      'state' => ShotState::JudgingVideo,
-      'video_path' => 'videos/test.mp4',
-    ]);
+        $shot = Shot::create([
+            'brief_id' => $brief->id,
+            'sequence' => 1,
+            'prompt' => 'Neon alley reflection',
+            'state' => ShotState::GeneratingVideo,
+        ]);
 
-    $judge = $this->createMock(JudgeInterface::class);
-    $judge->expects($this->once())
-      ->method('judgeVideo')
-      ->willReturn(new JudgementResult(
-        scores: ['temporal_consistency' => 1],
-        hardFailTags: ['temporal_flicker'],
-        reason: 'Severe flicker across frames',
-        verdict: JudgementVerdict::Fail,
-      ));
+        $videoProvider = $this->createMock(VideoProviderInterface::class);
+        $videoProvider->expects($this->once())
+            ->method('poll')
+            ->willReturn(VideoRenderResult::pending(45));
 
-    Bus::fake([PollVideoRenderJob::class]);
+        (new PollVideoRenderJob($shot->id, 'render_123', $brief->id))->handle($videoProvider, app(Budget::class));
 
-    (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(Budget::class));
+        Event::assertDispatched(
+            VideoProgressUpdated::class,
+            function (VideoProgressUpdated $event) use ($brief, $shot): bool {
+                return $event->briefId === $brief->id
+                  && $event->shotId === $shot->id
+                  && $event->progress === 45;
+            }
+        );
 
-    Event::assertDispatched(
-      JudgeVerdictRecorded::class,
-      function (JudgeVerdictRecorded $event) use ($brief, $shot): bool
-      {
-        $stage = $event->stage instanceof JudgementStage ? $event->stage->value : $event->stage;
-        $verdict = $event->verdict instanceof JudgementVerdict ? $event->verdict->value : $event->verdict;
+        $shot->refresh();
+        $this->assertSame(45, $shot->metadata['video_progress']);
 
-        return $event->briefId === $brief->id
-          && $event->shotId === $shot->id
-          && $stage === 'video'
-          && $verdict === 'fail'
-          && $event->hardFailTags === ['temporal_flicker'];
-      }
-    );
-    Event::assertDispatched(ShotUpdated::class);
-  }
+        $this->getJson("/briefs/{$brief->id}")
+            ->assertOk()
+            ->assertJsonPath('data.brief.shots.0.metadata.video_progress', 45);
+    }
+
+    public function test_judge_video_dispatches_judge_verdict_recorded_with_failure_tag(): void
+    {
+        Event::fake([JudgeVerdictRecorded::class, ShotUpdated::class, BriefStateChanged::class]);
+
+        $brief = Brief::create([
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+            'state' => BriefState::Rendering,
+        ]);
+
+        $shot = Shot::create([
+            'brief_id' => $brief->id,
+            'sequence' => 1,
+            'prompt' => 'Neon alley reflection',
+            'state' => ShotState::JudgingVideo,
+            'video_path' => 'videos/test.mp4',
+        ]);
+
+        $judge = $this->createMock(JudgeInterface::class);
+        $judge->expects($this->once())
+            ->method('judgeVideo')
+            ->willReturn(new JudgementResult(
+                scores: ['temporal_consistency' => 1],
+                hardFailTags: ['temporal_flicker'],
+                reason: 'Severe flicker across frames',
+                verdict: JudgementVerdict::Fail,
+            ));
+
+        Bus::fake([PollVideoRenderJob::class]);
+
+        (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(Budget::class));
+
+        Event::assertDispatched(
+            JudgeVerdictRecorded::class,
+            function (JudgeVerdictRecorded $event) use ($brief, $shot): bool {
+                $stage = $event->stage instanceof JudgementStage ? $event->stage->value : $event->stage;
+                $verdict = $event->verdict instanceof JudgementVerdict ? $event->verdict->value : $event->verdict;
+
+                return $event->briefId === $brief->id
+                  && $event->shotId === $shot->id
+                  && $stage === 'video'
+                  && $verdict === 'fail'
+                  && $event->hardFailTags === ['temporal_flicker'];
+            }
+        );
+        Event::assertDispatched(ShotUpdated::class);
+    }
 }

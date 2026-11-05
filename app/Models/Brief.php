@@ -15,81 +15,77 @@ use Illuminate\Support\Facades\DB;
 
 class Brief extends Model
 {
-  use HasFactory;
-  use HasStateTransitions;
+    use HasFactory;
+    use HasStateTransitions;
 
-  protected $fillable = [
-    'prompt',
-    'state',
-    'style_anchor',
-    'audio_path',
-    'final_video_path',
-    'budget_used',
-    'metadata',
-  ];
-
-  protected function casts(): array
-  {
-    return [
-      'state' => BriefState::class,
-      'metadata' => 'array',
-      'budget_used' => 'integer',
+    protected $fillable = [
+        'prompt',
+        'state',
+        'style_anchor',
+        'audio_path',
+        'final_video_path',
+        'budget_used',
+        'metadata',
     ];
-  }
 
-  protected static function booted(): void
-  {
-    static::updated(function (Brief $brief): void
+    protected function casts(): array
     {
-      if ($brief->wasChanged('state'))
-      {
-        BriefStateChanged::dispatch($brief->id, $brief->getOriginal('state'), $brief->state);
-      }
-    });
-  }
-
-  public function shots(): HasMany
-  {
-    return $this->hasMany(Shot::class)->orderBy('sequence');
-  }
-
-  /**
-   * Whether the provider budget stop has already fired for this brief.
-   */
-  public function isBudgetExhausted(): bool
-  {
-    return (bool) ($this->metadata['budget_exhausted'] ?? false);
-  }
-
-  /**
-   * Whether at least one shot passed its video judge, so there is a clip to mux.
-   */
-  public function hasPassingClip(): bool
-  {
-    return $this->shots()
-      ->where('state', ShotState::Done)
-      ->whereNotNull('video_path')
-      ->where('video_path', '!=', '')
-      ->exists();
-  }
-
-  /**
-   * Fail the brief and any shot still in flight.
-   */
-  public function failWithInFlightShots(): void
-  {
-    if (!$this->state->canTransitionTo(BriefState::Failed))
-    {
-      return;
+        return [
+            'state' => BriefState::class,
+            'metadata' => 'array',
+            'budget_used' => 'integer',
+        ];
     }
 
-    DB::transaction(function (): void
+    protected static function booted(): void
     {
-      $this->transitionTo(BriefState::Failed);
+        static::updated(function (Brief $brief): void {
+            if ($brief->wasChanged('state')) {
+                BriefStateChanged::dispatch($brief->id, $brief->getOriginal('state'), $brief->state);
+            }
+        });
+    }
 
-      $this->shots
-        ->filter(fn (Shot $shot) => $shot->state->canTransitionTo(ShotState::Failed))
-        ->each(fn (Shot $shot) => $shot->transitionTo(ShotState::Failed));
-    });
-  }
+    public function shots(): HasMany
+    {
+        return $this->hasMany(Shot::class)->orderBy('sequence');
+    }
+
+    /**
+     * Whether the provider budget stop has already fired for this brief.
+     */
+    public function isBudgetExhausted(): bool
+    {
+        return (bool) ($this->metadata['budget_exhausted'] ?? false);
+    }
+
+    /**
+     * Whether at least one shot passed its video judge, so there is a clip to mux.
+     */
+    public function hasPassingClip(): bool
+    {
+        return $this->shots()
+            ->where('state', ShotState::Done)
+            ->whereNotNull('video_path')
+            ->where('video_path', '!=', '')
+            ->exists();
+    }
+
+    /**
+     * Fail the brief and any shot still in flight.
+     */
+    public function failWithInFlightShots(): void
+    {
+        if (! $this->state->canTransitionTo(BriefState::Failed)) {
+            return;
+        }
+
+        DB::transaction(function (): void {
+            $this->transitionTo(BriefState::Failed);
+
+            $this->shots
+                ->filter(fn (Shot $shot) => $shot->state->canTransitionTo(ShotState::Failed))
+                ->each(fn (Shot $shot) => $shot->transitionTo(ShotState::Failed));
+        });
+    }
 }

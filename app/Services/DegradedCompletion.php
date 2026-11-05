@@ -13,83 +13,71 @@ use Illuminate\Support\Facades\DB;
 
 class DegradedCompletion
 {
-  /**
-   * Stop provider work and finish on the clips that already passed.
-   */
-  public function finish(Brief $brief): void
-  {
-    $brief->refresh();
-
-    if (in_array($brief->state, [BriefState::Done, BriefState::Degraded, BriefState::Failed], true))
+    /**
+     * Stop provider work and finish on the clips that already passed.
+     */
+    public function finish(Brief $brief): void
     {
-      return;
-    }
+        $brief->refresh();
 
-    if ($brief->isBudgetExhausted())
-    {
-      return;
-    }
-
-    DB::transaction(function () use ($brief): void
-    {
-      $locked = Brief::query()->whereKey($brief->id)->lockForUpdate()->firstOrFail();
-
-      if ($locked->isBudgetExhausted())
-      {
-        return;
-      }
-
-      $metadata = $locked->metadata ?? [];
-      $metadata['budget_exhausted'] = true;
-      $locked->update([
-        'metadata' => $metadata,
-      ]);
-
-      // Lock the shots too, so a late job's advanceUnlessStopped waits for this.
-      $locked->shots()->lockForUpdate()->get()->each(function (Shot $shot): void
-      {
-        if ($shot->state !== ShotState::Done && $shot->state->canTransitionTo(ShotState::Failed))
-        {
-          $shot->transitionTo(ShotState::Failed);
+        if (in_array($brief->state, [BriefState::Done, BriefState::Degraded, BriefState::Failed], true)) {
+            return;
         }
-      });
-    });
 
-    $this->muxOrDegrade($brief);
-  }
+        if ($brief->isBudgetExhausted()) {
+            return;
+        }
 
-  private function muxOrDegrade(Brief $brief): void
-  {
-    $brief->refresh();
+        DB::transaction(function () use ($brief): void {
+            $locked = Brief::query()->whereKey($brief->id)->lockForUpdate()->firstOrFail();
 
-    if (!$brief->hasPassingClip())
-    {
-      if ($brief->state->canTransitionTo(BriefState::Degraded))
-      {
-        $brief->transitionTo(BriefState::Degraded);
-      }
+            if ($locked->isBudgetExhausted()) {
+                return;
+            }
 
-      return;
+            $metadata = $locked->metadata ?? [];
+            $metadata['budget_exhausted'] = true;
+            $locked->update([
+                'metadata' => $metadata,
+            ]);
+
+            // Lock the shots too, so a late job's advanceUnlessStopped waits for this.
+            $locked->shots()->lockForUpdate()->get()->each(function (Shot $shot): void {
+                if ($shot->state !== ShotState::Done && $shot->state->canTransitionTo(ShotState::Failed)) {
+                    $shot->transitionTo(ShotState::Failed);
+                }
+            });
+        });
+
+        $this->muxOrDegrade($brief);
     }
 
-    if ($brief->state === BriefState::Keyframes)
+    private function muxOrDegrade(Brief $brief): void
     {
-      $brief->transitionTo(BriefState::Rendering);
-    }
+        $brief->refresh();
 
-    if ($brief->state === BriefState::Rendering)
-    {
-      $brief->transitionTo(BriefState::Audio);
-    }
+        if (! $brief->hasPassingClip()) {
+            if ($brief->state->canTransitionTo(BriefState::Degraded)) {
+                $brief->transitionTo(BriefState::Degraded);
+            }
 
-    if ($brief->state === BriefState::Audio)
-    {
-      $brief->transitionTo(BriefState::Muxing);
-    }
+            return;
+        }
 
-    if ($brief->state === BriefState::Muxing)
-    {
-      MuxFinalVideoJob::dispatch($brief->id);
+        if ($brief->state === BriefState::Keyframes) {
+            $brief->transitionTo(BriefState::Rendering);
+        }
+
+        if ($brief->state === BriefState::Rendering) {
+            $brief->transitionTo(BriefState::Audio);
+        }
+
+        if ($brief->state === BriefState::Audio) {
+            $brief->transitionTo(BriefState::Muxing);
+        }
+
+        if ($brief->state === BriefState::Muxing) {
+            MuxFinalVideoJob::dispatch($brief->id);
+        }
     }
-  }
 }

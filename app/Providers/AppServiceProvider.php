@@ -23,78 +23,67 @@ use InvalidArgumentException;
 
 class AppServiceProvider extends ServiceProvider
 {
-  /**
-   * Register any application services.
-   */
-  public function register(): void
-  {
-    $this->app->bind(AgentInterface::class, function ()
+    /**
+     * Register any application services.
+     */
+    public function register(): void
     {
-      $provider = config('creative.agent.provider', 'mock');
+        $this->app->bind(AgentInterface::class, function () {
+            $provider = config('creative.agent.provider', 'mock');
 
-      return match ($provider)
-      {
-        'mock' => new MockAgent(),
-        default => throw new InvalidArgumentException("Unsupported agent provider [{$provider}]."),
-      };
-    });
+            return match ($provider) {
+                'mock' => new MockAgent,
+                default => throw new InvalidArgumentException("Unsupported agent provider [{$provider}]."),
+            };
+        });
 
-    $this->app->bind(ImageProviderInterface::class, function ()
+        $this->app->bind(ImageProviderInterface::class, function () {
+            $provider = config('creative.image', 'replay');
+
+            return match ($provider) {
+                'replay' => new ReplayImageProvider,
+                default => throw new InvalidArgumentException("Unsupported image provider [{$provider}]."),
+            };
+        });
+
+        $this->app->bind(VideoProviderInterface::class, function () {
+            $provider = config('creative.video', 'replay');
+
+            return match ($provider) {
+                'replay' => new ReplayVideoProvider(
+                    pendingPolls: (int) config('creative.replay_pending_polls', 1),
+                ),
+                'ffmpeg_motion' => new FfmpegMotionVideoProvider,
+                default => throw new InvalidArgumentException("Unsupported video provider [{$provider}]."),
+            };
+        });
+
+        $this->app->bind(AudioProviderInterface::class, function () {
+            $provider = config('creative.audio', 'replay');
+
+            return match ($provider) {
+                'replay' => new ReplayAudioProvider,
+                default => throw new InvalidArgumentException("Unsupported audio provider [{$provider}]."),
+            };
+        });
+
+        $this->app->bind(JudgeInterface::class, function () {
+            $provider = config('creative.judge.provider', 'replay');
+
+            return match ($provider) {
+                'replay' => new ReplayJudge,
+                default => throw new InvalidArgumentException("Unsupported judge provider [{$provider}]."),
+            };
+        });
+    }
+
+    /**
+     * Bootstrap any application services.
+     */
+    public function boot(): void
     {
-      $provider = config('creative.image', 'replay');
-
-      return match ($provider)
-      {
-        'replay' => new ReplayImageProvider(),
-        default => throw new InvalidArgumentException("Unsupported image provider [{$provider}]."),
-      };
-    });
-
-    $this->app->bind(VideoProviderInterface::class, function ()
-    {
-      $provider = config('creative.video', 'replay');
-
-      return match ($provider)
-      {
-        'replay' => new ReplayVideoProvider(
-          pendingPolls: (int) config('creative.replay_pending_polls', 1),
-        ),
-        'ffmpeg_motion' => new FfmpegMotionVideoProvider(),
-        default => throw new InvalidArgumentException("Unsupported video provider [{$provider}]."),
-      };
-    });
-
-    $this->app->bind(AudioProviderInterface::class, function ()
-    {
-      $provider = config('creative.audio', 'replay');
-
-      return match ($provider)
-      {
-        'replay' => new ReplayAudioProvider(),
-        default => throw new InvalidArgumentException("Unsupported audio provider [{$provider}]."),
-      };
-    });
-
-    $this->app->bind(JudgeInterface::class, function ()
-    {
-      $provider = config('creative.judge.provider', 'replay');
-
-      return match ($provider)
-      {
-        'replay' => new ReplayJudge(),
-        default => throw new InvalidArgumentException("Unsupported judge provider [{$provider}]."),
-      };
-    });
-  }
-
-  /**
-   * Bootstrap any application services.
-   */
-  public function boot(): void
-  {
-    RateLimiter::for(GenerateAudioJob::RATE_LIMITER, function (): Limit
-    {
-      return Limit::perMinute((int) config('creative.audio_requests_per_minute', 10));
-    });
-  }
+        RateLimiter::for(GenerateAudioJob::RATE_LIMITER, function (): Limit {
+            return Limit::perMinute((int) config('creative.audio_requests_per_minute', 10));
+        });
+    }
 }

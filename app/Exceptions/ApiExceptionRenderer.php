@@ -16,57 +16,53 @@ use Throwable;
  */
 class ApiExceptionRenderer
 {
-  private const CODES_BY_STATUS = [
-    Response::HTTP_NOT_FOUND => 'not_found',
-    Response::HTTP_TOO_MANY_REQUESTS => 'too_many_requests',
-  ];
+    private const CODES_BY_STATUS = [
+        Response::HTTP_NOT_FOUND => 'not_found',
+        Response::HTTP_TOO_MANY_REQUESTS => 'too_many_requests',
+    ];
 
-  public static function isApiRequest(Request $request): bool
-  {
-    return $request->is('briefs*') || $request->expectsJson();
-  }
-
-  public function __invoke(Throwable $e, Request $request): ?JsonResponse
-  {
-    if (!self::isApiRequest($request))
+    public static function isApiRequest(Request $request): bool
     {
-      return null;
+        return $request->is('briefs*') || $request->expectsJson();
     }
 
-    if ($e instanceof ValidationException)
+    public function __invoke(Throwable $e, Request $request): ?JsonResponse
     {
-      return $this->respond(Response::HTTP_UNPROCESSABLE_ENTITY, 'validation_failed', 'The given data was invalid.', $e->errors());
+        if (! self::isApiRequest($request)) {
+            return null;
+        }
+
+        if ($e instanceof ValidationException) {
+            return $this->respond(Response::HTTP_UNPROCESSABLE_ENTITY, 'validation_failed', 'The given data was invalid.', $e->errors());
+        }
+
+        if ($e instanceof HttpExceptionInterface) {
+            $status = $e->getStatusCode();
+            $code = self::CODES_BY_STATUS[$status] ?? 'http_error';
+
+            return $this->respond($status, $code, Response::$statusTexts[$status] ?? 'HTTP error.')
+                ->withHeaders($e->getHeaders());
+        }
+
+        return $this->respond(Response::HTTP_INTERNAL_SERVER_ERROR, 'server_error', 'Server error.');
     }
 
-    if ($e instanceof HttpExceptionInterface)
+    /**
+     * @param  array<string, array<int, string>>|null  $fields
+     */
+    private function respond(int $status, string $code, string $message, ?array $fields = null): JsonResponse
     {
-      $status = $e->getStatusCode();
-      $code = self::CODES_BY_STATUS[$status] ?? 'http_error';
+        $error = ['message' => $message, 'code' => $code];
 
-      return $this->respond($status, $code, Response::$statusTexts[$status] ?? 'HTTP error.')
-        ->withHeaders($e->getHeaders());
+        if ($fields !== null) {
+            $error['fields'] = $fields;
+        }
+
+        return response()->json([
+            'success' => false,
+            'data' => null,
+            'error' => $error,
+            'meta' => null,
+        ], $status);
     }
-
-    return $this->respond(Response::HTTP_INTERNAL_SERVER_ERROR, 'server_error', 'Server error.');
-  }
-
-  /**
-   * @param array<string, array<int, string>>|null $fields
-   */
-  private function respond(int $status, string $code, string $message, ?array $fields = null): JsonResponse
-  {
-    $error = ['message' => $message, 'code' => $code];
-
-    if ($fields !== null)
-    {
-      $error['fields'] = $fields;
-    }
-
-    return response()->json([
-      'success' => false,
-      'data' => null,
-      'error' => $error,
-      'meta' => null,
-    ], $status);
-  }
 }

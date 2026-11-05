@@ -17,167 +17,155 @@ use Illuminate\Support\Facades\Bus;
 
 class ShotStepRetry
 {
-  public const MAX_RETRIES = 2;
+    public const MAX_RETRIES = 2;
 
-  public function __construct(
-    private readonly AgentInterface $agent,
-    private readonly Budget $budget,
-    private readonly ShotVideoSubmitter $submitter,
-    private readonly VideoProviderInterface $videos,
-  )
-  {
-  }
+    public function __construct(
+        private readonly AgentInterface $agent,
+        private readonly Budget $budget,
+        private readonly ShotVideoSubmitter $submitter,
+        private readonly VideoProviderInterface $videos,
+    ) {}
 
-  public function afterFailure(
-    Shot $shot,
-    JudgementResult $verdict,
-    JudgementStage $stage,
-    ?Batch $batch = null,
-  ): void
-  {
-    $shot->loadMissing('brief');
+    public function afterFailure(
+        Shot $shot,
+        JudgementResult $verdict,
+        JudgementStage $stage,
+        ?Batch $batch = null,
+    ): void {
+        $shot->loadMissing('brief');
 
-    $step = $stage === JudgementStage::Image ? 'image' : 'video';
-    // Snapshot before the charge refreshes the shot; the attempt log is built on it.
-    $metadata = $shot->metadata ?? [];
+        $step = $stage === JudgementStage::Image ? 'image' : 'video';
+        // Snapshot before the charge refreshes the shot; the attempt log is built on it.
+        $metadata = $shot->metadata ?? [];
 
-    if ($this->hasUsedAllRetries($shot, $metadata, $step))
-    {
-      return;
+        if ($this->hasUsedAllRetries($shot, $metadata, $step)) {
+            return;
+        }
+
+        if (! $this->chargeRewrite($shot)) {
+            return;
+        }
+
+        $this->rewriteAndLogAttempt($shot, $verdict, $metadata, $step);
+        $this->retryStep($shot, $stage, $batch);
     }
 
-    if (!$this->chargeRewrite($shot))
+    /**
+     * Fail the shot once its retries for this step are spent.
+     *
+     * @param  array<string, mixed>  $metadata
+     */
+    private function hasUsedAllRetries(Shot $shot, array $metadata, string $step): bool
     {
-      return;
+        $used = (int) ($metadata['step_attempts'][$step] ?? 0);
+
+        if ($used <= self::MAX_RETRIES) {
+            return false;
+        }
+
+        if ($shot->state->canTransitionTo(ShotState::Failed)) {
+            $shot->transitionTo(ShotState::Failed);
+        }
+
+        return true;
     }
 
-    $this->rewriteAndLogAttempt($shot, $verdict, $metadata, $step);
-    $this->retryStep($shot, $stage, $batch);
-  }
-
-  /**
-   * Fail the shot once its retries for this step are spent.
-   *
-   * @param array<string, mixed> $metadata
-   */
-  private function hasUsedAllRetries(Shot $shot, array $metadata, string $step): bool
-  {
-    $used = (int) ($metadata['step_attempts'][$step] ?? 0);
-
-    if ($used <= self::MAX_RETRIES)
+    /**
+     * Meter the rewrite call. False when the budget stop fired or failed the shot.
+     */
+    private function chargeRewrite(Shot $shot): bool
     {
-      return false;
+        if ($shot->brief !== null && ! $this->budget->chargeOrDegrade($shot->brief, 'agent', 'rewritePrompt')) {
+            return false;
+        }
+
+        $shot->refresh();
+
+        return $shot->state !== ShotState::Failed;
     }
 
-    if ($shot->state->canTransitionTo(ShotState::Failed))
+    /**
+     * @param  array<string, mixed>  $metadata
+     */
+    private function rewriteAndLogAttempt(Shot $shot, JudgementResult $verdict, array $metadata, string $step): void
     {
-      $shot->transitionTo(ShotState::Failed);
+        $log = $metadata['prompt_attempts'][$step] ?? [];
+
+        // The first rewrite overwrites shots.prompt, so keep the planned prompt
+        // here; every later rewrite must start from the scene as planned.
+        $originalPrompt = (string) ($metadata['original_prompt'] ?? $shot->prompt);
+        $metadata['original_prompt'] = $originalPrompt;
+
+        $rewritten = $this->rewrite($shot, $verdict, $originalPrompt, $log);
+
+        $log[] = [
+            'prompt' => $shot->prompt,
+            'reason' => $verdict->reason,
+        ];
+        $metadata['prompt_attempts'][$step] = $log;
+
+        $shot->update([
+            'prompt' => $rewritten,
+            'metadata' => $metadata,
+        ]);
     }
 
-    return true;
-  }
-
-  /**
-   * Meter the rewrite call. False when the budget stop fired or failed the shot.
-   */
-  private function chargeRewrite(Shot $shot): bool
-  {
-    if ($shot->brief !== null && !$this->budget->chargeOrDegrade($shot->brief, 'agent', 'rewritePrompt'))
+    /**
+     * @param  list<array<string, mixed>>  $previousAttempts
+     */
+    private function rewrite(Shot $shot, JudgementResult $verdict, string $originalPrompt, array $previousAttempts): string
     {
-      return false;
+        return $this->agent->rewritePrompt([
+            'brief' => (string) $shot->brief?->prompt,
+            'original_prompt' => $originalPrompt,
+            'failed_scores' => $verdict->scores,
+            'reason' => $verdict->reason,
+            'previous_attempts' => $previousAttempts,
+        ]);
     }
 
-    $shot->refresh();
-
-    return $shot->state !== ShotState::Failed;
-  }
-
-  /**
-   * @param array<string, mixed> $metadata
-   */
-  private function rewriteAndLogAttempt(Shot $shot, JudgementResult $verdict, array $metadata, string $step): void
-  {
-    $log = $metadata['prompt_attempts'][$step] ?? [];
-
-    // The first rewrite overwrites shots.prompt, so keep the planned prompt
-    // here; every later rewrite must start from the scene as planned.
-    $originalPrompt = (string) ($metadata['original_prompt'] ?? $shot->prompt);
-    $metadata['original_prompt'] = $originalPrompt;
-
-    $rewritten = $this->rewrite($shot, $verdict, $originalPrompt, $log);
-
-    $log[] = [
-      'prompt' => $shot->prompt,
-      'reason' => $verdict->reason,
-    ];
-    $metadata['prompt_attempts'][$step] = $log;
-
-    $shot->update([
-      'prompt' => $rewritten,
-      'metadata' => $metadata,
-    ]);
-  }
-
-  /**
-   * @param list<array<string, mixed>> $previousAttempts
-   */
-  private function rewrite(Shot $shot, JudgementResult $verdict, string $originalPrompt, array $previousAttempts): string
-  {
-    return $this->agent->rewritePrompt([
-      'brief' => (string) $shot->brief?->prompt,
-      'original_prompt' => $originalPrompt,
-      'failed_scores' => $verdict->scores,
-      'reason' => $verdict->reason,
-      'previous_attempts' => $previousAttempts,
-    ]);
-  }
-
-  private function retryStep(Shot $shot, JudgementStage $stage, ?Batch $batch): void
-  {
-    if ($stage === JudgementStage::Image)
+    private function retryStep(Shot $shot, JudgementStage $stage, ?Batch $batch): void
     {
-      $this->dispatch([
-        new GenerateKeyframeJob($shot->id, $shot->brief_id),
-        new JudgeKeyframeJob($shot->id, $shot->brief_id),
-      ], $batch);
+        if ($stage === JudgementStage::Image) {
+            $this->dispatch([
+                new GenerateKeyframeJob($shot->id, $shot->brief_id),
+                new JudgeKeyframeJob($shot->id, $shot->brief_id),
+            ], $batch);
 
-      return;
+            return;
+        }
+
+        $this->resubmitVideo($shot, $batch);
     }
 
-    $this->resubmitVideo($shot, $batch);
-  }
-
-  private function resubmitVideo(Shot $shot, ?Batch $batch): void
-  {
-    $poll = $this->submitter->submit($shot, $this->videos);
-
-    if ($poll === null)
+    private function resubmitVideo(Shot $shot, ?Batch $batch): void
     {
-      return;
+        $poll = $this->submitter->submit($shot, $this->videos);
+
+        if ($poll === null) {
+            return;
+        }
+
+        if ($batch !== null) {
+            $batch->add([$poll]);
+
+            return;
+        }
+
+        dispatch($poll);
     }
 
-    if ($batch !== null)
+    /**
+     * @param  list<object>  $jobs
+     */
+    private function dispatch(array $jobs, ?Batch $batch): void
     {
-      $batch->add([$poll]);
+        if ($batch !== null) {
+            $batch->add([$jobs]);
 
-      return;
+            return;
+        }
+
+        Bus::chain($jobs)->dispatch();
     }
-
-    dispatch($poll);
-  }
-
-  /**
-   * @param list<object> $jobs
-   */
-  private function dispatch(array $jobs, ?Batch $batch): void
-  {
-    if ($batch !== null)
-    {
-      $batch->add([$jobs]);
-
-      return;
-    }
-
-    Bus::chain($jobs)->dispatch();
-  }
 }

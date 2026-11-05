@@ -9,13 +9,13 @@ use Throwable;
 
 trait FailsBriefOnJobFailure
 {
-  /**
-   * Handle job failure by failing the brief and any shot still in flight.
-   */
-  public function failed(?Throwable $exception): void
-  {
-    $brief = Brief::find($this->briefId);
+    /**
+     * Handle job failure by failing the brief and any shot still in flight.
+     */
+    public function failed(?Throwable $exception): void
+    {
+        $brief = Brief::find($this->briefId);
 
-    $brief?->failWithInFlightShots();
-  }
+        $brief?->failWithInFlightShots();
+    }
 }

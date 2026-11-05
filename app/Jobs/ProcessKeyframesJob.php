@@ -12,39 +12,36 @@ use Illuminate\Support\Facades\Bus;
 
 class ProcessKeyframesJob implements ShouldQueue
 {
-  use FailsBriefOnJobFailure;
-  use Queueable;
+    use FailsBriefOnJobFailure;
+    use Queueable;
 
-  public function __construct(
-    public readonly int $briefId,
-  )
-  {
-    $this->onQueue('generate');
-  }
-
-  public function handle(): void
-  {
-    $brief = Brief::with('shots')->findOrFail($this->briefId);
-
-    $chains = [];
-
-    foreach ($brief->shots as $shot)
-    {
-      $chains[] = [
-        new GenerateKeyframeJob($shot->id, $brief->id),
-        new JudgeKeyframeJob($shot->id, $brief->id),
-      ];
+    public function __construct(
+        public readonly int $briefId,
+    ) {
+        $this->onQueue('generate');
     }
 
-    if (empty($chains))
+    public function handle(): void
     {
-      return;
-    }
+        $brief = Brief::with('shots')->findOrFail($this->briefId);
 
-    Bus::batch($chains)
-      ->name("keyframes-brief-{$brief->id}")
-      ->then(new AdvanceBriefToRenderingCallback($brief->id))
-      ->catch(new FailBriefOnBatchFailureCallback($brief->id))
-      ->dispatch();
-  }
+        $chains = [];
+
+        foreach ($brief->shots as $shot) {
+            $chains[] = [
+                new GenerateKeyframeJob($shot->id, $brief->id),
+                new JudgeKeyframeJob($shot->id, $brief->id),
+            ];
+        }
+
+        if (empty($chains)) {
+            return;
+        }
+
+        Bus::batch($chains)
+            ->name("keyframes-brief-{$brief->id}")
+            ->then(new AdvanceBriefToRenderingCallback($brief->id))
+            ->catch(new FailBriefOnBatchFailureCallback($brief->id))
+            ->dispatch();
+    }
 }
