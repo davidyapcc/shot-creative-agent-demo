@@ -9,6 +9,7 @@ use App\Contracts\JudgeInterface;
 use App\DTOs\JudgementResult;
 use App\DTOs\ShotPlan;
 use App\Enums\BriefState;
+use App\Enums\JudgementStage;
 use App\Enums\JudgementVerdict;
 use App\Enums\ShotState;
 use App\Events\ShotUpdated;
@@ -17,7 +18,9 @@ use App\Jobs\GenerateKeyframeJob;
 use App\Jobs\JudgeKeyframeJob;
 use App\Jobs\PlanBriefJob;
 use App\Jobs\ProcessKeyframesJob;
+use App\Jobs\RewritePromptJob;
 use App\Models\Brief;
+use App\Models\Judgement;
 use App\Models\Shot;
 use App\Services\Agent\MockAgent;
 use App\Services\Budget;
@@ -152,60 +155,6 @@ class AgentRateLimitTest extends TestCase
         Queue::assertPushed(ProcessKeyframesJob::class);
     }
 
-    public function test_rate_limited_rewrite_refunds_and_a_retry_does_not_judge_again(): void
-    {
-        Bus::fake();
-
-        $brief = Brief::create([
-            'prompt' => '15s product teaser, rainy Tokyo, neon',
-            'state' => BriefState::Keyframes,
-            'style_anchor' => 'cinematic neon rain',
-        ]);
-        $shot = Shot::create([
-            'brief_id' => $brief->id,
-            'sequence' => 1,
-            'prompt' => 'Shot 1: neon alley',
-            'state' => ShotState::JudgingImage,
-            'keyframe_path' => 'keyframes/shot_1.png',
-        ]);
-        $agent = new RateLimitedRewriteAgent;
-        $judge = new CountingFailJudge;
-        $retry = $this->app->make(ShotStepRetry::class, ['agent' => $agent]);
-        $job = new JudgeKeyframeJob($shot->id, $brief->id);
-
-        try {
-            $job->handle($judge, $retry, app(Budget::class), app(RateLimitHitCounter::class));
-            $this->fail('The rate-limit error should escape the job.');
-        } catch (ProviderRateLimitedException) {
-            $brief->refresh();
-            $shot->refresh();
-            $this->assertSame(1, $judge->calls);
-            $this->assertSame(1, $shot->judgements()->count());
-            $this->assertSame('Shot 1: neon alley', $shot->prompt);
-            $this->assertSame(1, $brief->budget_used);
-            $this->assertSame('judge', $brief->metadata['budget_ledger'][0]['provider']);
-            $this->assertSame(1, app(RateLimitHitCounter::class)->count('agent'));
-        }
-
-        $job->handle($judge, $retry, app(Budget::class), app(RateLimitHitCounter::class));
-
-        $shot->refresh();
-        $brief->refresh();
-        $this->assertSame(1, $judge->calls);
-        $this->assertSame(2, $agent->rewrites);
-        $this->assertSame('Shot 1: neon alley. Simpler hand.', $shot->prompt);
-        $this->assertSame(2, $brief->budget_used);
-        $this->assertSame(1, $shot->judgements()->count());
-        Bus::assertChained([
-            function (GenerateKeyframeJob $generate) use ($shot): bool {
-                return $generate->shotId === $shot->id;
-            },
-            function (JudgeKeyframeJob $judgeJob) use ($shot): bool {
-                return $judgeJob->shotId === $shot->id;
-            },
-        ]);
-    }
-
     public function test_a_plan_finished_after_the_brief_failed_is_dropped(): void
     {
         Queue::fake([ProcessKeyframesJob::class]);
@@ -246,43 +195,120 @@ class AgentRateLimitTest extends TestCase
         $this->assertSame([], $brief->metadata['budget_ledger'] ?? []);
     }
 
+    public function test_a_failed_judgement_queues_a_rewrite_instead_of_calling_the_agent(): void
+    {
+        Bus::fake();
+        [$brief, $shot] = $this->shotAwaitingImageJudgement();
+        $agent = new SteadyRewriteAgent;
+        $this->app->instance(AgentInterface::class, $agent);
+
+        (new JudgeKeyframeJob($shot->id, $brief->id))->handle(new CountingFailJudge, app(ShotStepRetry::class), app(Budget::class));
+
+        $judgement = $shot->judgements()->sole();
+        $this->assertSame(0, $agent->rewrites);
+        $this->assertSame(['judgeImage'], array_column($brief->refresh()->metadata['budget_ledger'], 'operation'));
+        Bus::assertDispatched(RewritePromptJob::class, fn (RewritePromptJob $job): bool => $job->shotId === $shot->id
+            && $job->briefId === $brief->id
+            && $job->judgementId === $judgement->id
+            && $job->stage === JudgementStage::Image);
+    }
+
+    public function test_rewrite_is_rate_limited_like_other_provider_jobs(): void
+    {
+        $job = new RewritePromptJob(1, 1, 1, JudgementStage::Image);
+
+        $limited = collect($job->middleware())->first(fn (object $middleware): bool => $middleware instanceof RateLimited);
+        $this->assertInstanceOf(RateLimited::class, $limited);
+        $this->assertSame(PlanBriefJob::RATE_LIMITER, (new ReflectionProperty($limited, 'limiterName'))->getValue($limited));
+        $this->assertTrue($job->failOnTimeout);
+        $this->assertEqualsWithDelta(now()->addHours(2)->getTimestamp(), $job->retryUntil()->getTimestamp(), 5);
+
+        $released = (new RewritePromptJob(1, 1, 1, JudgementStage::Image))->withFakeQueueInteractions();
+        $this->throttle($released)->handle($released, function (): void {
+            throw new ProviderRateLimitedException('Gemini agent returned HTTP 429.');
+        });
+        $released->assertReleased();
+        $released->assertNotFailed();
+
+        $failed = (new RewritePromptJob(1, 1, 1, JudgementStage::Image))->withFakeQueueInteractions();
+        $this->throttle($failed)->handle($failed, function (): void {
+            throw new RuntimeException('Gemini agent returned HTTP 500.');
+        });
+        $failed->assertFailed();
+    }
+
+    public function test_rate_limited_rewrite_refunds_releases_its_claim_and_a_retry_rewrites_once(): void
+    {
+        Bus::fake();
+        [$brief, $shot, $judgement] = $this->failedImageJudgement();
+        $agent = new RateLimitedRewriteAgent;
+        $job = new RewritePromptJob($shot->id, $brief->id, $judgement->id, JudgementStage::Image);
+
+        try {
+            $this->handleRewrite($job, $agent);
+            $this->fail('The rate-limit error should escape the job.');
+        } catch (ProviderRateLimitedException) {
+            $shot->refresh();
+            $this->assertSame('Shot 1: neon alley', $shot->prompt);
+            $this->assertArrayNotHasKey('rewrite_judgement_id', $shot->metadata ?? []);
+            $this->assertSame(0, $brief->refresh()->budget_used);
+            $this->assertSame(1, app(RateLimitHitCounter::class)->count('agent'));
+        }
+
+        $this->handleRewrite($job, $agent);
+
+        $shot->refresh();
+        $this->assertSame(2, $agent->rewrites);
+        $this->assertSame('Shot 1: neon alley. Simpler hand.', $shot->prompt);
+        $this->assertSame($judgement->id, $shot->metadata['rewrite_judgement_id']);
+        $this->assertSame(
+            [['prompt' => 'Shot 1: neon alley', 'reason' => 'Left hand has six fingers.']],
+            $shot->metadata['prompt_attempts']['image'],
+        );
+        $this->assertSame(['rewritePrompt'], array_column($brief->refresh()->metadata['budget_ledger'], 'operation'));
+        Bus::assertChained([
+            fn (GenerateKeyframeJob $generate): bool => $generate->shotId === $shot->id,
+            fn (JudgeKeyframeJob $judgeJob): bool => $judgeJob->shotId === $shot->id,
+        ]);
+    }
+
+    public function test_a_rewrite_already_claimed_for_the_judgement_skips_the_call_and_refunds(): void
+    {
+        Bus::fake();
+        [$brief, $shot, $judgement] = $this->failedImageJudgement();
+        $shot->update(['metadata' => ['rewrite_judgement_id' => $judgement->id]]);
+        $agent = new SteadyRewriteAgent;
+
+        $this->handleRewrite(new RewritePromptJob($shot->id, $brief->id, $judgement->id, JudgementStage::Image), $agent);
+
+        $this->assertSame(0, $agent->rewrites);
+        $this->assertSame('Shot 1: neon alley', $shot->refresh()->prompt);
+        $this->assertSame(0, $brief->refresh()->budget_used);
+        Bus::assertNothingDispatched();
+    }
+
     public function test_a_rewrite_finished_after_the_shot_stopped_is_dropped(): void
     {
         Bus::fake();
+        [$brief, $shot, $judgement] = $this->failedImageJudgement();
 
-        $brief = Brief::create([
-            'prompt' => '15s product teaser, rainy Tokyo, neon',
-            'state' => BriefState::Keyframes,
-            'style_anchor' => 'cinematic neon rain',
-        ]);
-        $shot = Shot::create([
-            'brief_id' => $brief->id,
-            'sequence' => 1,
-            'prompt' => 'Shot 1: neon alley',
-            'state' => ShotState::JudgingImage,
-            'keyframe_path' => 'keyframes/shot_1.png',
-        ]);
-        $agent = new LateRewriteAgent($shot);
-
-        (new JudgeKeyframeJob($shot->id, $brief->id))->handle(
-            new CountingFailJudge,
-            $this->app->make(ShotStepRetry::class, ['agent' => $agent]),
-            app(Budget::class),
+        $this->handleRewrite(
+            new RewritePromptJob($shot->id, $brief->id, $judgement->id, JudgementStage::Image),
+            new LateRewriteAgent($shot),
         );
 
         $shot->refresh();
         $this->assertSame(ShotState::Failed, $shot->state);
         $this->assertSame('Shot 1: neon alley', $shot->prompt);
-        $this->assertSame(2, $brief->refresh()->budget_used);
-        Bus::assertNotDispatched(GenerateKeyframeJob::class);
+        $this->assertSame(1, $brief->refresh()->budget_used);
+        Bus::assertNothingDispatched();
     }
 
-    public function test_rewrite_waits_on_the_agent_rate_limit_without_calling_or_judging_again(): void
+    /**
+     * @return array{0: Brief, 1: Shot}
+     */
+    private function shotAwaitingImageJudgement(): array
     {
-        Bus::fake();
-        config(['creative.agent.requests_per_minute' => 1]);
-        RateLimiter::hit(PlanBriefJob::rateLimitKey(), 60);
-
         $brief = Brief::create([
             'prompt' => '15s product teaser, rainy Tokyo, neon',
             'state' => BriefState::Keyframes,
@@ -295,31 +321,28 @@ class AgentRateLimitTest extends TestCase
             'state' => ShotState::JudgingImage,
             'keyframe_path' => 'keyframes/shot_1.png',
         ]);
-        $agent = new SteadyRewriteAgent;
-        $judge = new CountingFailJudge;
-        $retry = $this->app->make(ShotStepRetry::class, ['agent' => $agent]);
-        $job = new JudgeKeyframeJob($shot->id, $brief->id);
 
-        try {
-            $job->handle($judge, $retry, app(Budget::class));
-            $this->fail('The agent rate limit should release the rewrite.');
-        } catch (ProviderRateLimitedException) {
-            $this->assertSame(0, $agent->rewrites);
-            $this->assertSame(1, $judge->calls);
-            $this->assertSame(1, $brief->refresh()->budget_used);
-        }
-
-        RateLimiter::clear(PlanBriefJob::rateLimitKey());
-        $job->handle($judge, $retry, app(Budget::class));
-
-        $shot->refresh();
-        $this->assertSame(1, $judge->calls);
-        $this->assertSame(1, $agent->rewrites);
-        $this->assertSame('Shot 1: neon alley. Simpler hand.', $shot->prompt);
-        $this->assertSame(2, $brief->refresh()->budget_used);
+        return [$brief, $shot];
     }
 
-    private function throttle(PlanBriefJob $job): ThrottlesExceptions
+    /**
+     * @return array{0: Brief, 1: Shot, 2: Judgement}
+     */
+    private function failedImageJudgement(): array
+    {
+        [$brief, $shot] = $this->shotAwaitingImageJudgement();
+        $verdict = (new CountingFailJudge)->judgeImage((string) $shot->keyframe_path, $shot->prompt);
+        $judgement = Judgement::create($verdict->toModelAttributes($shot->id, JudgementStage::Image));
+
+        return [$brief, $shot, $judgement];
+    }
+
+    private function handleRewrite(RewritePromptJob $job, AgentInterface $agent): void
+    {
+        $job->handle($agent, app(Budget::class), app(ShotStepRetry::class), app(RateLimitHitCounter::class));
+    }
+
+    private function throttle(object $job): ThrottlesExceptions
     {
         return collect($job->middleware())
             ->first(fn (object $middleware): bool => $middleware instanceof ThrottlesExceptions);

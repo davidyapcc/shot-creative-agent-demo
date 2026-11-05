@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Unit;
 
-use App\Contracts\AgentInterface;
 use App\Contracts\ImageProviderInterface;
 use App\Contracts\JudgeInterface;
 use App\Contracts\VideoProviderInterface;
@@ -95,7 +94,7 @@ class BudgetStopRaceTest extends TestCase
         });
 
         // Act
-        (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, $this->app->make(ShotStepRetry::class, ['agent' => $this->createMock(AgentInterface::class)]), app(Budget::class));
+        (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(Budget::class));
 
         // Assert
         $this->assertSame(ShotState::Failed, $shot->refresh()->state);

@@ -15,29 +15,17 @@ use App\Models\Shot;
 use App\Services\Budget;
 use App\Services\RateLimitHitCounter;
 use App\Traits\FailsBriefOnJobFailure;
+use App\Traits\RetriesRateLimitedAgent;
 use Closure;
-use DateTimeInterface;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Queue\Middleware\RateLimited;
-use Illuminate\Queue\Middleware\ThrottlesExceptions;
 use Illuminate\Support\Facades\DB;
-use Throwable;
 
 class PlanBriefJob implements ShouldQueue
 {
     use FailsBriefOnJobFailure;
     use Queueable;
-
-    public const RATE_LIMITER = 'agent';
-
-    private const RETRY_WINDOW_HOURS = 2;
-
-    private const THROTTLE_MAX_EXCEPTIONS = 3;
-
-    private const THROTTLE_DECAY_SECONDS = 300;
-
-    private const THROTTLE_BACKOFF_MINUTES = 1;
+    use RetriesRateLimitedAgent;
 
     /**
      * Ledger operation for the one paid planning call.
@@ -49,40 +37,9 @@ class PlanBriefJob implements ShouldQueue
      */
     private const CLAIM_KEY = 'planning_claimed';
 
-    /**
-     * A timed-out run already took its charge, so a retry would pay twice.
-     */
-    public bool $failOnTimeout = true;
-
     public function __construct(
         public readonly int $briefId,
     ) {}
-
-    /**
-     * @return list<object>
-     */
-    public function middleware(): array
-    {
-        return [
-            new RateLimited(self::RATE_LIMITER),
-            (new ThrottlesExceptions(self::THROTTLE_MAX_EXCEPTIONS, self::THROTTLE_DECAY_SECONDS))
-                ->backoff(self::THROTTLE_BACKOFF_MINUTES)
-                ->failWhen(fn (Throwable $exception): bool => ! $exception instanceof ProviderRateLimitedException),
-        ];
-    }
-
-    public function retryUntil(): DateTimeInterface
-    {
-        return now()->addHours(self::RETRY_WINDOW_HOURS);
-    }
-
-    /**
-     * The cache key RateLimited uses for this job, so a rewrite can share it.
-     */
-    public static function rateLimitKey(): string
-    {
-        return md5(self::RATE_LIMITER);
-    }
 
     public function handle(AgentInterface $agent, Budget $budget, ?RateLimitHitCounter $rateLimits = null): void
     {

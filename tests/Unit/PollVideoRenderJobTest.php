@@ -324,7 +324,8 @@ class PollVideoRenderJobTest extends TestCase
 
     public function test_judge_video_job_does_not_fail_the_brief_on_the_first_verdict_fail(): void
     {
-        Bus::fake();
+        // The queued rewrite runs on the sync queue and resubmits the video.
+        Bus::fake([PollVideoRenderJob::class]);
 
         $brief = Brief::create([
             'prompt' => '15s product teaser',

@@ -31,9 +31,15 @@ class JudgeRetryTest extends TestCase
 {
     use RefreshDatabase;
 
+    /**
+     * Fake the regenerate/re-judge chain; the RewritePromptJob still runs on
+     * the sync queue so the agent is really called.
+     */
+    private const FAKED_RETRY_JOBS = [GenerateKeyframeJob::class, JudgeKeyframeJob::class];
+
     public function test_image_fail_rewrites_and_regenerates_only_that_shot(): void
     {
-        Bus::fake();
+        Bus::fake(self::FAKED_RETRY_JOBS);
 
         $brief = Brief::create([
             'prompt' => '15s product teaser, rainy Tokyo, neon',
@@ -60,7 +66,7 @@ class JudgeRetryTest extends TestCase
         $agent = new RecordingAgent;
         $judge = $this->failingImageJudge('Left hand has six fingers.', ['anatomy' => 2, 'prompt_adherence' => 4, 'object_integrity' => 5]);
 
-        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->app->make(ShotStepRetry::class, ['agent' => $agent]), app(Budget::class));
+        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(Budget::class));
 
         $this->assertSame(BriefState::Keyframes, $brief->refresh()->state);
         $this->assertSame(ShotState::JudgingImage, $other->refresh()->state);
@@ -93,7 +99,7 @@ class JudgeRetryTest extends TestCase
 
     public function test_second_image_fail_passes_each_earlier_prompt_and_reason(): void
     {
-        Bus::fake();
+        Bus::fake(self::FAKED_RETRY_JOBS);
 
         $brief = Brief::create([
             'prompt' => '15s product teaser, rainy Tokyo, neon',
@@ -125,7 +131,7 @@ class JudgeRetryTest extends TestCase
         $agent = new RecordingAgent;
         $judge = $this->failingImageJudge('Still six fingers.', ['anatomy' => 1, 'prompt_adherence' => 4, 'object_integrity' => 5]);
 
-        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->app->make(ShotStepRetry::class, ['agent' => $agent]), app(Budget::class));
+        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(Budget::class));
 
         $this->assertSame([
             ['prompt' => 'Shot 1: neon alley', 'reason' => 'Left hand has six fingers.'],
@@ -137,7 +143,7 @@ class JudgeRetryTest extends TestCase
     public function test_every_rewrite_receives_the_planned_prompt_as_original_prompt(): void
     {
         // Arrange
-        Bus::fake();
+        Bus::fake(self::FAKED_RETRY_JOBS);
 
         $brief = Brief::create([
             'prompt' => '15s product teaser, rainy Tokyo, neon',
@@ -156,8 +162,8 @@ class JudgeRetryTest extends TestCase
         $judge = $this->failingImageJudge('Left hand has six fingers.', ['anatomy' => 2, 'prompt_adherence' => 4, 'object_integrity' => 5], calls: 2);
 
         // Act
-        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->app->make(ShotStepRetry::class, ['agent' => $agent]), app(Budget::class));
-        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->app->make(ShotStepRetry::class, ['agent' => $agent]), app(Budget::class));
+        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(Budget::class));
+        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(Budget::class));
 
         // Assert
         $this->assertCount(2, $agent->contexts);
@@ -169,7 +175,7 @@ class JudgeRetryTest extends TestCase
 
     public function test_image_step_stops_after_two_retries_without_failing_the_brief(): void
     {
-        Bus::fake();
+        Bus::fake(self::FAKED_RETRY_JOBS);
 
         $brief = Brief::create([
             'prompt' => '15s product teaser, rainy Tokyo, neon',
@@ -192,7 +198,7 @@ class JudgeRetryTest extends TestCase
         $agent = new RecordingAgent;
         $judge = $this->failingImageJudge('Still six fingers.', ['anatomy' => 1]);
 
-        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->app->make(ShotStepRetry::class, ['agent' => $agent]), app(Budget::class));
+        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(Budget::class));
 
         $this->assertSame([], $agent->contexts);
         $this->assertSame(ShotState::Failed, $shot->refresh()->state);
@@ -287,7 +293,7 @@ class JudgeRetryTest extends TestCase
                 verdict: JudgementVerdict::Fail,
             ));
 
-        (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, $this->app->make(ShotStepRetry::class, ['agent' => $agent]), app(Budget::class));
+        (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(Budget::class));
 
         $this->assertSame([
             ['prompt' => 'Shot 1: original', 'reason' => 'Extreme temporal flicker'],
@@ -321,6 +327,13 @@ class JudgeRetryTest extends TestCase
             ));
 
         return $judge;
+    }
+
+    private function retryWith(AgentInterface $agent): ShotStepRetry
+    {
+        $this->app->instance(AgentInterface::class, $agent);
+
+        return app(ShotStepRetry::class);
     }
 }
 
