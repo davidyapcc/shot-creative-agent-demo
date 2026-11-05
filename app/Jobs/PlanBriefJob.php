@@ -17,52 +17,47 @@ use Illuminate\Foundation\Queue\Queueable;
 
 class PlanBriefJob implements ShouldQueue
 {
-  use FailsBriefOnJobFailure;
-  use Queueable;
+    use FailsBriefOnJobFailure;
+    use Queueable;
 
-  public function __construct(
-    public readonly int $briefId,
-  )
-  {
-  }
+    public function __construct(
+        public readonly int $briefId,
+    ) {}
 
-  public function handle(AgentInterface $agent, Budget $budget): void
-  {
-    $brief = Brief::findOrFail($this->briefId);
-
-    $brief->transitionTo(BriefState::Planning);
-
-    if (!$budget->chargeOrDegrade($brief, 'agent', 'generateStyleAnchor'))
+    public function handle(AgentInterface $agent, Budget $budget): void
     {
-      return;
+        $brief = Brief::findOrFail($this->briefId);
+
+        $brief->transitionTo(BriefState::Planning);
+
+        if (! $budget->chargeOrDegrade($brief, 'agent', 'generateStyleAnchor')) {
+            return;
+        }
+
+        $styleAnchor = $agent->generateStyleAnchor($brief->prompt);
+        $brief->update([
+            'style_anchor' => $styleAnchor,
+        ]);
+
+        if (! $budget->chargeOrDegrade($brief, 'agent', 'planShots')) {
+            return;
+        }
+
+        $plannedShots = $agent->planShots($brief->prompt);
+
+        foreach ($plannedShots as $shotData) {
+            $shot = Shot::create([
+                'brief_id' => $brief->id,
+                'sequence' => $shotData['sequence'],
+                'prompt' => $shotData['prompt'],
+                'state' => ShotState::Pending,
+            ]);
+
+            ShotUpdated::dispatch($shot);
+        }
+
+        $brief->transitionTo(BriefState::Keyframes);
+
+        ProcessKeyframesJob::dispatch($brief->id);
     }
-
-    $styleAnchor = $agent->generateStyleAnchor($brief->prompt);
-    $brief->update([
-      'style_anchor' => $styleAnchor,
-    ]);
-
-    if (!$budget->chargeOrDegrade($brief, 'agent', 'planShots'))
-    {
-      return;
-    }
-
-    $plannedShots = $agent->planShots($brief->prompt);
-
-    foreach ($plannedShots as $shotData)
-    {
-      $shot = Shot::create([
-        'brief_id' => $brief->id,
-        'sequence' => $shotData['sequence'],
-        'prompt' => $shotData['prompt'],
-        'state' => ShotState::Pending,
-      ]);
-
-      ShotUpdated::dispatch($shot);
-    }
-
-    $brief->transitionTo(BriefState::Keyframes);
-
-    ProcessKeyframesJob::dispatch($brief->id);
-  }
 }

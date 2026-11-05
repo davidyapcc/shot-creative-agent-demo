@@ -19,52 +19,48 @@ use Illuminate\Foundation\Queue\Queueable;
 
 class JudgeKeyframeJob implements ShouldQueue
 {
-  use Batchable;
-  use FailsBriefOnJobFailure;
-  use Queueable;
+    use Batchable;
+    use FailsBriefOnJobFailure;
+    use Queueable;
 
-  public function __construct(
-    public readonly int $shotId,
-    public readonly int $briefId,
-  )
-  {
-    $this->onQueue('judge');
-  }
-
-  public function handle(JudgeInterface $judge, ShotStepRetry $retry, Budget $budget): void
-  {
-    if ($this->batch()?->cancelled())
-    {
-      return;
+    public function __construct(
+        public readonly int $shotId,
+        public readonly int $briefId,
+    ) {
+        $this->onQueue('judge');
     }
 
-    $shot = Shot::with('brief')->findOrFail($this->shotId);
-
-    if (!$budget->chargeShotStep($shot, 'judge', 'judgeImage'))
+    public function handle(JudgeInterface $judge, ShotStepRetry $retry, Budget $budget): void
     {
-      return;
+        if ($this->batch()?->cancelled()) {
+            return;
+        }
+
+        $shot = Shot::with('brief')->findOrFail($this->shotId);
+
+        if (! $budget->chargeShotStep($shot, 'judge', 'judgeImage')) {
+            return;
+        }
+
+        $verdict = $judge->judgeImage(
+            (string) $shot->keyframe_path,
+            $shot->prompt,
+            $shot->brief?->style_anchor,
+        );
+
+        Judgement::create($verdict->toModelAttributes($shot->id, JudgementStage::Image));
+
+        event(JudgeVerdictRecorded::fromVerdict(
+            $this->briefId,
+            $this->shotId,
+            JudgementStage::Image,
+            $verdict,
+        ));
+
+        ShotUpdated::dispatch($shot->refresh());
+
+        if ($verdict->isFail()) {
+            $retry->afterFailure($shot, $verdict, JudgementStage::Image, $this->batch());
+        }
     }
-
-    $verdict = $judge->judgeImage(
-      (string) $shot->keyframe_path,
-      $shot->prompt,
-      $shot->brief?->style_anchor,
-    );
-
-    Judgement::create($verdict->toModelAttributes($shot->id, JudgementStage::Image));
-
-    event(JudgeVerdictRecorded::fromVerdict(
-      $this->briefId,
-      $this->shotId,
-      JudgementStage::Image,
-      $verdict,
-    ));
-
-    ShotUpdated::dispatch($shot->refresh());
-
-    if ($verdict->isFail())
-    {
-      $retry->afterFailure($shot, $verdict, JudgementStage::Image, $this->batch());
-    }
-  }
 }

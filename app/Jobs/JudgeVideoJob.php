@@ -20,58 +20,51 @@ use Illuminate\Foundation\Queue\Queueable;
 
 class JudgeVideoJob implements ShouldQueue
 {
-  use Batchable;
-  use FailsBriefOnJobFailure;
-  use Queueable;
+    use Batchable;
+    use FailsBriefOnJobFailure;
+    use Queueable;
 
-  public function __construct(
-    public readonly int $shotId,
-    public readonly int $briefId,
-  )
-  {
-    $this->onQueue('judge');
-  }
-
-  public function handle(JudgeInterface $judge, ShotStepRetry $retry, Budget $budget): void
-  {
-    if ($this->batch()?->cancelled())
-    {
-      return;
+    public function __construct(
+        public readonly int $shotId,
+        public readonly int $briefId,
+    ) {
+        $this->onQueue('judge');
     }
 
-    $shot = Shot::with('brief')->findOrFail($this->shotId);
-
-    if (!$budget->chargeShotStep($shot, 'judge', 'judgeVideo'))
+    public function handle(JudgeInterface $judge, ShotStepRetry $retry, Budget $budget): void
     {
-      return;
+        if ($this->batch()?->cancelled()) {
+            return;
+        }
+
+        $shot = Shot::with('brief')->findOrFail($this->shotId);
+
+        if (! $budget->chargeShotStep($shot, 'judge', 'judgeVideo')) {
+            return;
+        }
+
+        $verdict = $judge->judgeVideo(
+            (string) $shot->video_path,
+            $shot->prompt,
+            $shot->brief?->style_anchor,
+        );
+
+        Judgement::create($verdict->toModelAttributes($shot->id, JudgementStage::Video));
+
+        event(JudgeVerdictRecorded::fromVerdict(
+            $this->briefId,
+            $this->shotId,
+            JudgementStage::Video,
+            $verdict,
+        ));
+
+        if ($verdict->isPass()) {
+            if ($shot->advanceUnlessStopped(ShotState::Done)) {
+                ShotUpdated::dispatch($shot);
+            }
+        } else {
+            ShotUpdated::dispatch($shot->refresh());
+            $retry->afterFailure($shot, $verdict, JudgementStage::Video, $this->batch());
+        }
     }
-
-    $verdict = $judge->judgeVideo(
-      (string) $shot->video_path,
-      $shot->prompt,
-      $shot->brief?->style_anchor,
-    );
-
-    Judgement::create($verdict->toModelAttributes($shot->id, JudgementStage::Video));
-
-    event(JudgeVerdictRecorded::fromVerdict(
-      $this->briefId,
-      $this->shotId,
-      JudgementStage::Video,
-      $verdict,
-    ));
-
-    if ($verdict->isPass())
-    {
-      if ($shot->advanceUnlessStopped(ShotState::Done))
-      {
-        ShotUpdated::dispatch($shot);
-      }
-    }
-    else
-    {
-      ShotUpdated::dispatch($shot->refresh());
-      $retry->afterFailure($shot, $verdict, JudgementStage::Video, $this->batch());
-    }
-  }
 }

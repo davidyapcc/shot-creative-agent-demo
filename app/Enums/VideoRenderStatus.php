@@ -6,7 +6,7 @@ namespace App\Enums;
 
 enum VideoRenderStatus: string
 {
-  case Pending = 'pending';
-  case Completed = 'completed';
-  case Failed = 'failed';
+    case Pending = 'pending';
+    case Completed = 'completed';
+    case Failed = 'failed';
 }

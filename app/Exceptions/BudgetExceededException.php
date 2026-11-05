@@ -6,6 +6,4 @@ namespace App\Exceptions;
 
 use RuntimeException;
 
-class BudgetExceededException extends RuntimeException
-{
-}
+class BudgetExceededException extends RuntimeException {}

@@ -14,78 +14,76 @@ use Illuminate\Support\Facades\DB;
 
 class Shot extends Model
 {
-  use HasFactory;
-  use HasStateTransitions;
+    use HasFactory;
+    use HasStateTransitions;
 
-  protected $fillable = [
-    'brief_id',
-    'sequence',
-    'prompt',
-    'state',
-    'keyframe_path',
-    'video_path',
-    'attempts',
-    'metadata',
-  ];
-
-  protected function casts(): array
-  {
-    return [
-      'state' => ShotState::class,
-      'sequence' => 'integer',
-      'attempts' => 'integer',
-      'metadata' => 'array',
+    protected $fillable = [
+        'brief_id',
+        'sequence',
+        'prompt',
+        'state',
+        'keyframe_path',
+        'video_path',
+        'attempts',
+        'metadata',
     ];
-  }
 
-  public function brief(): BelongsTo
-  {
-    return $this->belongsTo(Brief::class);
-  }
-
-  public function judgements(): HasMany
-  {
-    return $this->hasMany(Judgement::class)->orderBy('id');
-  }
-
-  /**
-   * Count one more run of a step ('image' or 'video'), in total and per step.
-   *
-   * @param array<string, mixed> $metadata extra metadata to store in the same update
-   */
-  public function recordStepAttempt(string $step, array $metadata = []): void
-  {
-    $merged = array_merge($this->metadata ?? [], $metadata);
-    $merged['step_attempts'][$step] = (int) ($merged['step_attempts'][$step] ?? 0) + 1;
-
-    $this->update([
-      'attempts' => (int) $this->attempts + 1,
-      'metadata' => $merged,
-    ]);
-  }
-
-  /**
-   * Move on after a provider call, unless the budget stop failed this shot
-   * while the call was in flight. Returns false when the result must be dropped.
-   */
-  public function advanceUnlessStopped(ShotState $target): bool
-  {
-    $isAdvanced = DB::transaction(function () use ($target): bool
+    protected function casts(): array
     {
-      $locked = self::query()->whereKey($this->id)->lockForUpdate()->firstOrFail();
+        return [
+            'state' => ShotState::class,
+            'sequence' => 'integer',
+            'attempts' => 'integer',
+            'metadata' => 'array',
+        ];
+    }
 
-      if ($locked->state === ShotState::Failed)
-      {
-        return false;
-      }
+    public function brief(): BelongsTo
+    {
+        return $this->belongsTo(Brief::class);
+    }
 
-      $locked->transitionTo($target);
+    public function judgements(): HasMany
+    {
+        return $this->hasMany(Judgement::class)->orderBy('id');
+    }
 
-      return true;
-    });
+    /**
+     * Count one more run of a step ('image' or 'video'), in total and per step.
+     *
+     * @param  array<string, mixed>  $metadata  extra metadata to store in the same update
+     */
+    public function recordStepAttempt(string $step, array $metadata = []): void
+    {
+        $merged = array_merge($this->metadata ?? [], $metadata);
+        $merged['step_attempts'][$step] = (int) ($merged['step_attempts'][$step] ?? 0) + 1;
 
-    $this->refresh();
+        $this->update([
+            'attempts' => (int) $this->attempts + 1,
+            'metadata' => $merged,
+        ]);
+    }
 
-    return $isAdvanced;
-  }
+    /**
+     * Move on after a provider call, unless the budget stop failed this shot
+     * while the call was in flight. Returns false when the result must be dropped.
+     */
+    public function advanceUnlessStopped(ShotState $target): bool
+    {
+        $isAdvanced = DB::transaction(function () use ($target): bool {
+            $locked = self::query()->whereKey($this->id)->lockForUpdate()->firstOrFail();
+
+            if ($locked->state === ShotState::Failed) {
+                return false;
+            }
+
+            $locked->transitionTo($target);
+
+            return true;
+        });
+
+        $this->refresh();
+
+        return $isAdvanced;
+    }
 }

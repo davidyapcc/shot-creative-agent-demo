@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Contracts\AgentInterface;
-use App\Services\Budget;
 use App\Contracts\AudioProviderInterface;
 use App\Contracts\ImageProviderInterface;
 use App\Contracts\JudgeInterface;
@@ -24,6 +23,7 @@ use App\Jobs\ProcessKeyframesJob;
 use App\Jobs\RenderShotsJob;
 use App\Models\Brief;
 use App\Models\Shot;
+use App\Services\Budget;
 use Exception;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
@@ -33,230 +33,225 @@ use Tests\TestCase;
 
 class WalkingSkeletonTest extends TestCase
 {
-  use RefreshDatabase;
+    use RefreshDatabase;
 
-  public function test_brief_accepted_and_reaches_done_on_mock_providers(): void
-  {
-    Storage::fake('s3');
-
-    $response = $this->postJson('/briefs', [
-      'prompt' => '15s product teaser, rainy Tokyo, neon',
-    ]);
-
-    $response->assertStatus(202)
-      ->assertJsonPath('success', true)
-      ->assertJsonPath('data.brief.state', BriefState::Pending->value);
-
-    $briefId = $response->json('data.brief.id');
-
-    $brief = Brief::with('shots')->findOrFail($briefId);
-
-    $this->assertSame(BriefState::Done, $brief->state);
-    $this->assertCount(3, $brief->shots);
-    $this->assertNotNull($brief->style_anchor);
-    $this->assertNotNull($brief->audio_path);
-    $this->assertNotNull($brief->final_video_path);
-    $this->assertIsString($brief->metadata['sound_effect_path'] ?? null);
-    Storage::disk('s3')->assertExists($brief->audio_path);
-    Storage::disk('s3')->assertExists($brief->metadata['sound_effect_path']);
-    Storage::disk('s3')->assertExists($brief->final_video_path);
-
-    foreach ($brief->shots as $shot)
+    public function test_brief_accepted_and_reaches_done_on_mock_providers(): void
     {
-      $this->assertSame(ShotState::Done, $shot->state);
-      $this->assertNotNull($shot->keyframe_path);
-      $this->assertNotNull($shot->video_path);
-      Storage::disk('s3')->assertExists($shot->keyframe_path);
-      Storage::disk('s3')->assertExists($shot->video_path);
+        Storage::fake('s3');
+
+        $response = $this->postJson('/briefs', [
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+        ]);
+
+        $response->assertStatus(202)
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.brief.state', BriefState::Pending->value);
+
+        $briefId = $response->json('data.brief.id');
+
+        $brief = Brief::with('shots')->findOrFail($briefId);
+
+        $this->assertSame(BriefState::Done, $brief->state);
+        $this->assertCount(3, $brief->shots);
+        $this->assertNotNull($brief->style_anchor);
+        $this->assertNotNull($brief->audio_path);
+        $this->assertNotNull($brief->final_video_path);
+        $this->assertIsString($brief->metadata['sound_effect_path'] ?? null);
+        Storage::disk('s3')->assertExists($brief->audio_path);
+        Storage::disk('s3')->assertExists($brief->metadata['sound_effect_path']);
+        Storage::disk('s3')->assertExists($brief->final_video_path);
+
+        foreach ($brief->shots as $shot) {
+            $this->assertSame(ShotState::Done, $shot->state);
+            $this->assertNotNull($shot->keyframe_path);
+            $this->assertNotNull($shot->video_path);
+            Storage::disk('s3')->assertExists($shot->keyframe_path);
+            Storage::disk('s3')->assertExists($shot->video_path);
+        }
+
+        $brief->load('shots.judgements');
+        // The replay fixture retries Shot 1's image and Shot 2's video once each.
+        $this->assertCount(3, $brief->shots[0]->judgements);
+        $this->assertCount(3, $brief->shots[1]->judgements);
+        $this->assertCount(2, $brief->shots[2]->judgements);
+        $this->assertDatabaseCount('judgements', 8);
+
+        $getResponse = $this->getJson("/briefs/{$briefId}");
+        $getResponse->assertStatus(200)
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.brief.state', BriefState::Done->value)
+            ->assertJsonCount(3, 'data.brief.shots')
+            ->assertJsonPath('data.brief.shots.0.state', ShotState::Done->value)
+            ->assertJsonPath('data.brief.shots.1.state', ShotState::Done->value)
+            ->assertJsonPath('data.brief.shots.2.state', ShotState::Done->value);
     }
 
-    $brief->load('shots.judgements');
-    // The replay fixture retries Shot 1's image and Shot 2's video once each.
-    $this->assertCount(3, $brief->shots[0]->judgements);
-    $this->assertCount(3, $brief->shots[1]->judgements);
-    $this->assertCount(2, $brief->shots[2]->judgements);
-    $this->assertDatabaseCount('judgements', 8);
-
-    $getResponse = $this->getJson("/briefs/{$briefId}");
-    $getResponse->assertStatus(200)
-      ->assertJsonPath('success', true)
-      ->assertJsonPath('data.brief.state', BriefState::Done->value)
-      ->assertJsonCount(3, 'data.brief.shots')
-      ->assertJsonPath('data.brief.shots.0.state', ShotState::Done->value)
-      ->assertJsonPath('data.brief.shots.1.state', ShotState::Done->value)
-      ->assertJsonPath('data.brief.shots.2.state', ShotState::Done->value);
-  }
-
-  public function test_brief_transitions_through_each_pipeline_stage_sequentially(): void
-  {
-    Storage::fake('s3');
-
-    Queue::fake([
-      ProcessKeyframesJob::class,
-      RenderShotsJob::class,
-      GenerateAudioJob::class,
-      MuxFinalVideoJob::class,
-    ]);
-
-    $brief = Brief::create([
-      'prompt' => '15s product teaser, rainy Tokyo, neon',
-      'state' => BriefState::Pending,
-    ]);
-
-    $this->assertSame(BriefState::Pending, $brief->state);
-
-    // Stage 1: Planning
-    $agent = app(AgentInterface::class);
-    $planJob = new PlanBriefJob($brief->id);
-    $planJob->handle($agent, app(Budget::class));
-
-    $brief->refresh();
-    $this->assertSame(BriefState::Keyframes, $brief->state);
-    $this->assertCount(3, $brief->shots);
-    $this->assertSame(ShotState::Pending, $brief->shots->first()->state);
-    Queue::assertPushed(ProcessKeyframesJob::class);
-
-    // Stage 2: Keyframes
-    $imageProvider = app(ImageProviderInterface::class);
-    $judge = app(JudgeInterface::class);
-    $keyframesJob = new ProcessKeyframesJob($brief->id);
-    $keyframesJob->handle($imageProvider, $judge);
-
-    $brief->refresh();
-    $this->assertSame(BriefState::Rendering, $brief->state);
-    $this->assertSame(ShotState::JudgingImage, $brief->shots->first()->state);
-    Queue::assertPushed(RenderShotsJob::class);
-
-    // Stage 3: Rendering
-    $videoProvider = app(VideoProviderInterface::class);
-    $renderJob = new RenderShotsJob($brief->id);
-    $renderJob->handle($videoProvider);
-
-    $brief->refresh();
-    $this->assertSame(BriefState::Audio, $brief->state);
-    $this->assertSame(ShotState::Done, $brief->shots->first()->state);
-    Queue::assertPushed(GenerateAudioJob::class);
-
-    // Stage 4: Audio
-    $audioJob = new GenerateAudioJob($brief->id);
-    $audioJob->handle(app(AudioProviderInterface::class), app(Budget::class));
-
-    $brief->refresh();
-    $this->assertSame(BriefState::Muxing, $brief->state);
-    $this->assertNotNull($brief->audio_path);
-    Queue::assertPushed(MuxFinalVideoJob::class);
-
-    // Stage 5: Muxing -> Done
-    $muxJob = new MuxFinalVideoJob($brief->id);
-    $muxJob->handle();
-
-    $brief->refresh();
-    $this->assertSame(BriefState::Done, $brief->state);
-    $this->assertNotNull($brief->final_video_path);
-  }
-
-  public function test_job_failure_transitions_brief_to_failed(): void
-  {
-    $brief = Brief::create([
-      'prompt' => '15s product teaser, rainy Tokyo, neon',
-      'state' => BriefState::Pending,
-    ]);
-
-    $job = new PlanBriefJob($brief->id);
-    $job->failed(new Exception('Something went wrong during generation'));
-
-    $brief->refresh();
-    $this->assertSame(BriefState::Failed, $brief->state);
-  }
-
-  public function test_job_failure_also_fails_unfinished_shots_and_keeps_done_shots(): void
-  {
-    $brief = Brief::create([
-      'prompt' => '15s product teaser, rainy Tokyo, neon',
-      'state' => BriefState::Rendering,
-    ]);
-    $inFlightShot = $this->createShot($brief, 1, ShotState::GeneratingVideo);
-    $doneShot = $this->createShot($brief, 2, ShotState::Done);
-
-    (new RenderShotsJob($brief->id))->failed(new Exception('Render provider timed out'));
-
-    $this->assertSame(BriefState::Failed, $brief->refresh()->state);
-    $this->assertSame(ShotState::Failed, $inFlightShot->refresh()->state);
-    $this->assertSame(ShotState::Done, $doneShot->refresh()->state);
-  }
-
-  public function test_brief_emits_state_changed_event_for_every_pipeline_stage_in_order(): void
-  {
-    Storage::fake('s3');
-    Event::fake([BriefStateChanged::class]);
-
-    $this->postJson('/briefs', [
-      'prompt' => '15s product teaser, rainy Tokyo, neon',
-    ])->assertStatus(202);
-
-    $transitions = Event::dispatched(BriefStateChanged::class)
-      ->map(fn (array $args) => [$args[0]->from, $args[0]->to])
-      ->all();
-
-    $this->assertSame([
-      [BriefState::Pending, BriefState::Planning],
-      [BriefState::Planning, BriefState::Keyframes],
-      [BriefState::Keyframes, BriefState::Rendering],
-      [BriefState::Rendering, BriefState::Audio],
-      [BriefState::Audio, BriefState::Muxing],
-      [BriefState::Muxing, BriefState::Done],
-    ], $transitions);
-  }
-
-  public function test_full_pipeline_broadcasts_events_on_per_brief_channel(): void
-  {
-    Storage::fake('s3');
-    Event::fake([
-      BriefStateChanged::class,
-      VideoProgressUpdated::class,
-      ShotUpdated::class,
-      JudgeVerdictRecorded::class,
-    ]);
-
-    $response = $this->postJson('/briefs', [
-      'prompt' => '15s product teaser, rainy Tokyo, neon',
-    ]);
-
-    $response->assertStatus(202);
-    $briefId = $response->json('data.brief.id');
-
-    Event::assertDispatched(BriefStateChanged::class, function (BriefStateChanged $event) use ($briefId): bool
+    public function test_brief_transitions_through_each_pipeline_stage_sequentially(): void
     {
-      return $event->briefId === $briefId;
-    });
+        Storage::fake('s3');
 
-    Event::assertDispatched(ShotUpdated::class, function (ShotUpdated $event) use ($briefId): bool
+        Queue::fake([
+            ProcessKeyframesJob::class,
+            RenderShotsJob::class,
+            GenerateAudioJob::class,
+            MuxFinalVideoJob::class,
+        ]);
+
+        $brief = Brief::create([
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+            'state' => BriefState::Pending,
+        ]);
+
+        $this->assertSame(BriefState::Pending, $brief->state);
+
+        // Stage 1: Planning
+        $agent = app(AgentInterface::class);
+        $planJob = new PlanBriefJob($brief->id);
+        $planJob->handle($agent, app(Budget::class));
+
+        $brief->refresh();
+        $this->assertSame(BriefState::Keyframes, $brief->state);
+        $this->assertCount(3, $brief->shots);
+        $this->assertSame(ShotState::Pending, $brief->shots->first()->state);
+        Queue::assertPushed(ProcessKeyframesJob::class);
+
+        // Stage 2: Keyframes
+        $imageProvider = app(ImageProviderInterface::class);
+        $judge = app(JudgeInterface::class);
+        $keyframesJob = new ProcessKeyframesJob($brief->id);
+        $keyframesJob->handle($imageProvider, $judge);
+
+        $brief->refresh();
+        $this->assertSame(BriefState::Rendering, $brief->state);
+        $this->assertSame(ShotState::JudgingImage, $brief->shots->first()->state);
+        Queue::assertPushed(RenderShotsJob::class);
+
+        // Stage 3: Rendering
+        $videoProvider = app(VideoProviderInterface::class);
+        $renderJob = new RenderShotsJob($brief->id);
+        $renderJob->handle($videoProvider);
+
+        $brief->refresh();
+        $this->assertSame(BriefState::Audio, $brief->state);
+        $this->assertSame(ShotState::Done, $brief->shots->first()->state);
+        Queue::assertPushed(GenerateAudioJob::class);
+
+        // Stage 4: Audio
+        $audioJob = new GenerateAudioJob($brief->id);
+        $audioJob->handle(app(AudioProviderInterface::class), app(Budget::class));
+
+        $brief->refresh();
+        $this->assertSame(BriefState::Muxing, $brief->state);
+        $this->assertNotNull($brief->audio_path);
+        Queue::assertPushed(MuxFinalVideoJob::class);
+
+        // Stage 5: Muxing -> Done
+        $muxJob = new MuxFinalVideoJob($brief->id);
+        $muxJob->handle();
+
+        $brief->refresh();
+        $this->assertSame(BriefState::Done, $brief->state);
+        $this->assertNotNull($brief->final_video_path);
+    }
+
+    public function test_job_failure_transitions_brief_to_failed(): void
     {
-      return $event->shot->brief_id === $briefId;
-    });
+        $brief = Brief::create([
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+            'state' => BriefState::Pending,
+        ]);
 
-    Event::assertDispatched(VideoProgressUpdated::class, function (VideoProgressUpdated $event) use ($briefId): bool
+        $job = new PlanBriefJob($brief->id);
+        $job->failed(new Exception('Something went wrong during generation'));
+
+        $brief->refresh();
+        $this->assertSame(BriefState::Failed, $brief->state);
+    }
+
+    public function test_job_failure_also_fails_unfinished_shots_and_keeps_done_shots(): void
     {
-      return $event->briefId === $briefId;
-    });
+        $brief = Brief::create([
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+            'state' => BriefState::Rendering,
+        ]);
+        $inFlightShot = $this->createShot($brief, 1, ShotState::GeneratingVideo);
+        $doneShot = $this->createShot($brief, 2, ShotState::Done);
 
-    Event::assertDispatched(JudgeVerdictRecorded::class, function (JudgeVerdictRecorded $event) use ($briefId): bool
+        (new RenderShotsJob($brief->id))->failed(new Exception('Render provider timed out'));
+
+        $this->assertSame(BriefState::Failed, $brief->refresh()->state);
+        $this->assertSame(ShotState::Failed, $inFlightShot->refresh()->state);
+        $this->assertSame(ShotState::Done, $doneShot->refresh()->state);
+    }
+
+    public function test_brief_emits_state_changed_event_for_every_pipeline_stage_in_order(): void
     {
-      $isPass = $event->verdict instanceof JudgementVerdict
-        ? $event->verdict === JudgementVerdict::Pass
-        : $event->verdict === 'pass';
+        Storage::fake('s3');
+        Event::fake([BriefStateChanged::class]);
 
-      return $event->briefId === $briefId && $isPass;
-    });
-  }
+        $this->postJson('/briefs', [
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+        ])->assertStatus(202);
 
-  private function createShot(Brief $brief, int $sequence, ShotState $state): Shot
-  {
-    return Shot::create([
-      'brief_id' => $brief->id,
-      'sequence' => $sequence,
-      'prompt' => "Shot {$sequence}: neon alley",
-      'state' => $state,
-    ]);
-  }
+        $transitions = Event::dispatched(BriefStateChanged::class)
+            ->map(fn (array $args) => [$args[0]->from, $args[0]->to])
+            ->all();
+
+        $this->assertSame([
+            [BriefState::Pending, BriefState::Planning],
+            [BriefState::Planning, BriefState::Keyframes],
+            [BriefState::Keyframes, BriefState::Rendering],
+            [BriefState::Rendering, BriefState::Audio],
+            [BriefState::Audio, BriefState::Muxing],
+            [BriefState::Muxing, BriefState::Done],
+        ], $transitions);
+    }
+
+    public function test_full_pipeline_broadcasts_events_on_per_brief_channel(): void
+    {
+        Storage::fake('s3');
+        Event::fake([
+            BriefStateChanged::class,
+            VideoProgressUpdated::class,
+            ShotUpdated::class,
+            JudgeVerdictRecorded::class,
+        ]);
+
+        $response = $this->postJson('/briefs', [
+            'prompt' => '15s product teaser, rainy Tokyo, neon',
+        ]);
+
+        $response->assertStatus(202);
+        $briefId = $response->json('data.brief.id');
+
+        Event::assertDispatched(BriefStateChanged::class, function (BriefStateChanged $event) use ($briefId): bool {
+            return $event->briefId === $briefId;
+        });
+
+        Event::assertDispatched(ShotUpdated::class, function (ShotUpdated $event) use ($briefId): bool {
+            return $event->shot->brief_id === $briefId;
+        });
+
+        Event::assertDispatched(VideoProgressUpdated::class, function (VideoProgressUpdated $event) use ($briefId): bool {
+            return $event->briefId === $briefId;
+        });
+
+        Event::assertDispatched(JudgeVerdictRecorded::class, function (JudgeVerdictRecorded $event) use ($briefId): bool {
+            $isPass = $event->verdict instanceof JudgementVerdict
+              ? $event->verdict === JudgementVerdict::Pass
+              : $event->verdict === 'pass';
+
+            return $event->briefId === $briefId && $isPass;
+        });
+    }
+
+    private function createShot(Brief $brief, int $sequence, ShotState $state): Shot
+    {
+        return Shot::create([
+            'brief_id' => $brief->id,
+            'sequence' => $sequence,
+            'prompt' => "Shot {$sequence}: neon alley",
+            'state' => $state,
+        ]);
+    }
 }

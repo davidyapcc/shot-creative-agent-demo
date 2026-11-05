@@ -6,6 +6,6 @@ namespace App\Enums;
 
 enum JudgementStage: string
 {
-  case Image = 'image';
-  case Video = 'video';
+    case Image = 'image';
+    case Video = 'video';
 }

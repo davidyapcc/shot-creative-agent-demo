@@ -8,21 +8,20 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-  public function up(): void
-  {
-    Schema::create('eval_runs', function (Blueprint $table)
+    public function up(): void
     {
-      $table->id();
-      $table->string('judge_driver');
-      $table->string('dataset');
-      $table->json('metrics')->nullable();
-      $table->json('results')->nullable();
-      $table->timestamps();
-    });
-  }
+        Schema::create('eval_runs', function (Blueprint $table) {
+            $table->id();
+            $table->string('judge_driver');
+            $table->string('dataset');
+            $table->json('metrics')->nullable();
+            $table->json('results')->nullable();
+            $table->timestamps();
+        });
+    }
 
-  public function down(): void
-  {
-    Schema::dropIfExists('eval_runs');
-  }
+    public function down(): void
+    {
+        Schema::dropIfExists('eval_runs');
+    }
 };
