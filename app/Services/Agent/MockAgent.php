@@ -9,6 +9,8 @@ use App\DTOs\ShotPlan;
 
 class MockAgent implements AgentInterface
 {
+    public const UNKNOWN_REASON = 'the failing element';
+
     /**
      * Plan 3 shots and a style anchor deterministically from the prompt.
      */
@@ -33,33 +35,8 @@ class MockAgent implements AgentInterface
     public function rewritePrompt(array $context): string
     {
         $scene = $context['original_prompt'];
-        $reason = $context['reason'] ?? 'the failing element';
-        $fix = RewriteInstructions::simplify($reason);
+        $reason = $context['reason'] ?? self::UNKNOWN_REASON;
 
-        if ($this->fixAlreadyFailed($fix, $scene, $context['previous_attempts'])) {
-            $fix = RewriteInstructions::different($reason);
-        }
-
-        return $scene.' '.$fix;
-    }
-
-    /**
-     * @param  list<array{prompt?: string, reason?: string|null}>  $previousAttempts
-     */
-    private function fixAlreadyFailed(string $fix, string $scene, array $previousAttempts): bool
-    {
-        if (str_contains($scene, $fix)) {
-            return true;
-        }
-
-        foreach ($previousAttempts as $attempt) {
-            $prompt = $attempt['prompt'] ?? '';
-
-            if ($prompt !== '' && str_contains($prompt, $fix)) {
-                return true;
-            }
-        }
-
-        return false;
+        return $scene.' '.RewriteInstructions::for($reason, $scene, $context['previous_attempts']);
     }
 }

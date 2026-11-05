@@ -8,6 +8,7 @@ use App\Contracts\AgentInterface;
 use App\Exceptions\ProviderRateLimitedException;
 use App\Services\Agent\MockAgent;
 use App\Services\Agent\PrismAgent;
+use App\Services\Agent\RewriteInstructions;
 use Illuminate\Support\Facades\Http;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -315,19 +316,44 @@ class PrismAgentTest extends TestCase
             $prompt = (string) $requests[0]->prompt();
 
             $this->assertStringContainsString(
-                'Simplify only this failure: Left hand has six fingers. Keep the same scene.',
+                'Instruction: Simplify only this failure: Left hand has six fingers. Keep the same scene.',
                 $prompt,
             );
-            $this->assertStringContainsString(
-                'Use a different simplification than before for: Left hand has six fingers. Keep the same scene.',
-                $prompt,
-            );
+            $this->assertStringNotContainsString('different simplification', $prompt);
             $this->assertStringContainsString('15s product teaser, rainy Tokyo, neon', $prompt);
             $this->assertStringContainsString('Shot 1: neon alley', $prompt);
             $this->assertStringContainsString('Left hand has six fingers.', $prompt);
             $this->assertStringContainsString('anatomy', $prompt);
             $this->assertStringContainsString('Shot 1: neon alley, simplified hand', $prompt);
             $this->assertStringContainsString('Still six fingers.', $prompt);
+        });
+    }
+
+    public function test_rewrite_sends_only_the_different_fix_once_simplify_already_failed(): void
+    {
+        $fake = Prism::fake([
+            StructuredResponseFake::make()->withStructured(['prompt' => 'Shot 1: neon alley, hand out of frame.']),
+        ]);
+        $simplify = RewriteInstructions::simplify('Left hand has six fingers.');
+
+        $this->agent()->rewritePrompt([
+            'brief' => '15s product teaser, rainy Tokyo, neon',
+            'original_prompt' => 'Shot 1: neon alley',
+            'failed_scores' => ['anatomy' => 2],
+            'reason' => 'Left hand has six fingers.',
+            'previous_attempts' => [
+                ['prompt' => "Shot 1: neon alley {$simplify}", 'reason' => 'Left hand has six fingers.'],
+            ],
+        ]);
+
+        $fake->assertRequest(function (array $requests): void {
+            $prompt = (string) $requests[0]->prompt();
+
+            $this->assertStringContainsString(
+                'Instruction: '.RewriteInstructions::different('Left hand has six fingers.'),
+                $prompt,
+            );
+            $this->assertStringNotContainsString('Instruction: Simplify only this failure', $prompt);
         });
     }
 

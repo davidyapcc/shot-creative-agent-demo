@@ -69,13 +69,12 @@ class PrismAgent implements AgentInterface
     {
         $scores = json_encode($context['failed_scores'], JSON_THROW_ON_ERROR);
 
-        $reason = $context['reason'] ?? 'the failing element';
+        $reason = $context['reason'] ?? MockAgent::UNKNOWN_REASON;
+        $instruction = RewriteInstructions::for($reason, $context['original_prompt'], $context['previous_attempts']);
 
         return implode("\n", [
-            'Rewrite the failed shot prompt.',
-            RewriteInstructions::simplify($reason),
-            'If that fix already appears in the scene or a previous attempt, '
-                .RewriteInstructions::different($reason),
+            'Rewrite the failed shot prompt. Keep the planned scene and apply this instruction.',
+            'Instruction: '.$instruction,
             'brief: '.$context['brief'],
             'original_prompt: '.$context['original_prompt'],
             'failed_scores: '.$scores,
