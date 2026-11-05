@@ -9,11 +9,14 @@ use App\Enums\JudgementStage;
 use App\Enums\ShotState;
 use App\Events\JudgeVerdictRecorded;
 use App\Events\ShotUpdated;
+use App\Exceptions\ProviderRateLimitedException;
 use App\Models\Judgement;
 use App\Models\Shot;
 use App\Services\Budget;
+use App\Services\RateLimitHitCounter;
 use App\Services\ShotStepRetry;
 use App\Traits\FailsBriefOnJobFailure;
+use App\Traits\RetriesRateLimitedJudge;
 use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -23,6 +26,7 @@ class JudgeVideoJob implements ShouldQueue
     use Batchable;
     use FailsBriefOnJobFailure;
     use Queueable;
+    use RetriesRateLimitedJudge;
 
     public function __construct(
         public readonly int $shotId,
@@ -31,8 +35,14 @@ class JudgeVideoJob implements ShouldQueue
         $this->onQueue('judge');
     }
 
-    public function handle(JudgeInterface $judge, ShotStepRetry $retry, Budget $budget): void
-    {
+    public function handle(
+        JudgeInterface $judge,
+        ShotStepRetry $retry,
+        Budget $budget,
+        ?RateLimitHitCounter $rateLimits = null,
+    ): void {
+        $rateLimits ??= new RateLimitHitCounter;
+
         if ($this->batch()?->cancelled()) {
             return;
         }
@@ -43,11 +53,17 @@ class JudgeVideoJob implements ShouldQueue
             return;
         }
 
-        $verdict = $judge->judgeVideo(
-            (string) $shot->video_path,
-            $shot->prompt,
-            $shot->brief?->style_anchor,
-        );
+        try {
+            $verdict = $judge->judgeVideo(
+                (string) $shot->video_path,
+                $shot->prompt,
+                $shot->brief?->style_anchor,
+            );
+        } catch (ProviderRateLimitedException $exception) {
+            $this->releaseRateLimitedJudge($shot, $budget, $rateLimits, 'judgeVideo');
+
+            throw $exception;
+        }
 
         Judgement::create($verdict->toModelAttributes($shot->id, JudgementStage::Video));
 
