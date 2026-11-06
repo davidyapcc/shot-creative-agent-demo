@@ -24,11 +24,11 @@ class Telemetry
     private const LATEST_SAMPLE = 50;
 
     /**
-     * Pipeline queues from config/horizon.php. Other queues are ops noise.
+     * Used only when config/horizon.php lists no supervisor queues.
      *
      * @var list<string>
      */
-    private const QUEUES = ['default', 'generate', 'poll', 'judge', 'audio'];
+    private const FALLBACK_QUEUES = ['default', 'generate', 'poll', 'judge', 'audio'];
 
     public function __construct(private readonly RateLimitHitCounter $rateLimits) {}
 
@@ -59,7 +59,7 @@ class Telemetry
             'duration_p95_seconds' => $this->durationPercentile($briefs, 95),
             'cost_units_per_brief' => $this->costPerBrief($briefs),
             'queue_depth' => $this->queueDepth($horizon),
-            'failed_jobs' => $this->failedJobs($horizon),
+            'failed_jobs' => $this->failedJobs(),
             'rate_limit_hits' => $this->rateLimits->total(),
         ];
     }
@@ -211,11 +211,13 @@ class Telemetry
 
     private function queueDepth(bool $horizon): int
     {
+        $queues = $this->pipelineQueues();
+
         if ($horizon) {
             try {
                 $workload = app(WorkloadRepository::class)->get();
                 if ($workload !== []) {
-                    return $this->depthFromWorkload($workload);
+                    return $this->depthFromWorkload($workload, $queues);
                 }
             } catch (Throwable) {
                 // Horizon's workload read failed. Use the queue driver.
@@ -223,7 +225,7 @@ class Telemetry
         }
 
         $depth = 0;
-        foreach (self::QUEUES as $queue) {
+        foreach ($queues as $queue) {
             $depth += (int) Queue::size($queue);
         }
 
@@ -231,14 +233,38 @@ class Telemetry
     }
 
     /**
-     * @param  array<int, array<string, mixed>>  $workload
+     * Supervisor queues from config/horizon.php. Other queues are ops noise.
+     *
+     * @return list<string>
      */
-    private function depthFromWorkload(array $workload): int
+    private function pipelineQueues(): array
+    {
+        $configured = data_get(config('horizon.defaults'), '*.queue', []);
+        $queues = [];
+
+        foreach (is_array($configured) ? $configured : [] as $queue) {
+            foreach (is_array($queue) ? $queue : [$queue] as $name) {
+                if (is_string($name) && $name !== '') {
+                    $queues[] = $name;
+                }
+            }
+        }
+
+        $queues = array_values(array_unique($queues));
+
+        return $queues === [] ? self::FALLBACK_QUEUES : $queues;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $workload
+     * @param  list<string>  $queues
+     */
+    private function depthFromWorkload(array $workload, array $queues): int
     {
         $depth = 0;
         foreach ($workload as $queue) {
             $name = $queue['name'] ?? '';
-            if (! in_array($name, self::QUEUES, true)) {
+            if (! in_array($name, $queues, true)) {
                 continue;
             }
 
@@ -248,14 +274,12 @@ class Telemetry
         return $depth;
     }
 
-    private function failedJobs(bool $horizon): int
+    private function failedJobs(): int
     {
-        if ($horizon) {
-            try {
-                return (int) app(JobRepository::class)->countFailed();
-            } catch (Throwable) {
-                // Horizon cannot count failures. Use the failed_jobs table.
-            }
+        try {
+            return (int) app(JobRepository::class)->countFailed();
+        } catch (Throwable) {
+            // Horizon cannot count failures. Use the failed_jobs table.
         }
 
         return (int) DB::table('failed_jobs')->count();

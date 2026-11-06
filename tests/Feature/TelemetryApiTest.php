@@ -26,6 +26,16 @@ class TelemetryApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Failed-job counts try Horizon first. Leave that call unavailable unless a test stubs it.
+        $this->mock(JobRepository::class, function ($mock): void {
+            $mock->shouldReceive('countFailed')->zeroOrMoreTimes()->andThrow(new RuntimeException('redis down'));
+        });
+    }
+
     public function test_telemetry_renders_an_empty_snapshot_on_a_fresh_install(): void
     {
         $this->horizonMasters([]);
@@ -245,6 +255,73 @@ class TelemetryApiTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('data.queue_depth', 1)
             ->assertJsonPath('data.failed_jobs', 1);
+    }
+
+    public function test_queue_depth_counts_only_the_queues_horizon_is_configured_to_run(): void
+    {
+        config([
+            'horizon.defaults' => [
+                'supervisor-audio' => ['queue' => ['audio']],
+            ],
+        ]);
+        $this->horizonMasters([]);
+        Queue::fake();
+        Queue::pushOn('generate', new PlanBriefJob(1));
+        Queue::pushOn('audio', new PlanBriefJob(1));
+
+        $response = $this->getJson('/telemetry');
+
+        $response->assertOk()
+            ->assertJsonPath('data.queue_depth', 1);
+    }
+
+    public function test_queue_depth_counts_configured_queues_in_a_horizon_workload(): void
+    {
+        config([
+            'horizon.defaults' => [
+                'supervisor-audio' => ['queue' => 'audio'],
+            ],
+        ]);
+        $this->horizonMasters([(object) ['status' => 'running']]);
+        $this->mock(WorkloadRepository::class, function ($mock): void {
+            $mock->shouldReceive('get')->andReturn([
+                ['name' => 'generate', 'length' => 9],
+                ['name' => 'audio', 'length' => 2],
+            ]);
+        });
+
+        $response = $this->getJson('/telemetry');
+
+        $response->assertOk()
+            ->assertJsonPath('data.queue_depth', 2);
+    }
+
+    public function test_queue_depth_uses_the_pipeline_queues_when_horizon_lists_none(): void
+    {
+        config(['horizon.defaults' => []]);
+        $this->horizonMasters([]);
+        Queue::fake();
+        Queue::pushOn('generate', new PlanBriefJob(1));
+        Queue::pushOn('mail', new PlanBriefJob(1));
+
+        $response = $this->getJson('/telemetry');
+
+        $response->assertOk()
+            ->assertJsonPath('data.queue_depth', 1);
+    }
+
+    public function test_failed_jobs_use_horizon_even_when_no_master_is_running(): void
+    {
+        $this->horizonMasters([]);
+        $this->mock(JobRepository::class, function ($mock): void {
+            $mock->shouldReceive('countFailed')->andReturn(4);
+        });
+        $this->failedJob('generate');
+
+        $response = $this->getJson('/telemetry');
+
+        $response->assertOk()
+            ->assertJsonPath('data.failed_jobs', 4);
     }
 
     public function test_queue_metrics_read_horizon_when_a_master_is_running(): void

@@ -53,4 +53,31 @@ describe('QualityTelemetry', () =>
     expect(text).not.toContain('None');
     expect(text).not.toContain('NaN');
   });
+
+  it('renders dashes and zeroes when a metric is not a finite number', () =>
+  {
+    const wrapper = mount(QualityTelemetry, {
+      props: {
+        telemetry: {
+          pass_rate: 'nope',
+          top_failure_tags: null,
+          retries_per_brief: undefined,
+          duration_p50_seconds: Number.NaN,
+          duration_p95_seconds: '',
+          cost_units_per_brief: Number.POSITIVE_INFINITY,
+          queue_depth: 'nope',
+          failed_jobs: null,
+          rate_limit_hits: undefined,
+        },
+      },
+    });
+
+    const text = wrapper.text();
+    expect(text).toContain('—');
+    expect(text).toContain('None');
+    expect(text).toContain('0');
+    expect(text).not.toContain('NaN');
+    expect(text).not.toContain('Infinity');
+    expect(text).not.toContain('nope');
+  });
 });

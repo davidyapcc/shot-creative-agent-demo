@@ -34,6 +34,7 @@
 
 <script setup>
 import { computed } from 'vue';
+import { normalizeTelemetry } from '../telemetry';
 
 const props = defineProps({
   telemetry: {
@@ -42,15 +43,13 @@ const props = defineProps({
   },
 });
 
-const tags = computed(() =>
-{
-  const list = props.telemetry?.top_failure_tags;
-  return Array.isArray(list) ? list : [];
-});
+const view = computed(() => normalizeTelemetry(props.telemetry));
+
+const tags = computed(() => view.value.top_failure_tags);
 
 const metrics = computed(() =>
 {
-  const telemetry = props.telemetry ?? {};
+  const telemetry = view.value;
 
   return [
     { label: 'Pass rate', value: formatMetric(telemetry.pass_rate, '%') },
@@ -58,25 +57,19 @@ const metrics = computed(() =>
     { label: 'Duration p50', value: formatMetric(telemetry.duration_p50_seconds, 's') },
     { label: 'Duration p95', value: formatMetric(telemetry.duration_p95_seconds, 's') },
     { label: 'Cost / brief', value: formatMetric(telemetry.cost_units_per_brief) },
-    { label: 'Queue depth', value: formatCount(telemetry.queue_depth) },
-    { label: 'Failed jobs', value: formatCount(telemetry.failed_jobs) },
-    { label: 'Rate limits', value: formatCount(telemetry.rate_limit_hits) },
+    { label: 'Queue depth', value: String(telemetry.queue_depth) },
+    { label: 'Failed jobs', value: String(telemetry.failed_jobs) },
+    { label: 'Rate limits', value: String(telemetry.rate_limit_hits) },
   ];
 });
 
 function formatMetric(value, suffix = '')
 {
-  if (value === null || value === undefined || Number.isNaN(Number(value)))
+  if (value === null)
   {
     return '—';
   }
 
   return `${value}${suffix}`;
-}
-
-function formatCount(value)
-{
-  const number = Number(value);
-  return Number.isFinite(number) ? String(number) : '0';
 }
 </script>
