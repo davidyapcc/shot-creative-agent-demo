@@ -12,7 +12,7 @@ Pint's Laravel preset (`pint.json`) is the standard. Run `composer format` on th
 
 ## Paid-call discipline
 
-Every provider call spends brief budget. These rules each come from a bug already fixed once:
+Every provider call spends brief budget, except eval runs, which carry their own (`docs/adr/0001-eval-runs-carry-their-own-budget.md`). These rules each come from a bug already fixed once:
 
 - **Charge first.** Go through `Budget::chargeShotStep` (shot steps) or `Budget::chargeOrDegrade` (brief steps); on `false`, skip the call.
 - **Re-check after the call.** The budget stop can fail a shot while its job is mid-call. Advance with `Shot::advanceUnlessStopped`, which locks the row and drops the late result.
