@@ -6,6 +6,7 @@ namespace App\Services\Providers;
 
 use App\Contracts\JudgeInterface;
 use App\DTOs\JudgementResult;
+use App\Exceptions\MissingReplayClipException;
 use RuntimeException;
 
 class ReplayJudge implements JudgeInterface
@@ -71,7 +72,7 @@ class ReplayJudge implements JudgeInterface
         }
 
         if (! array_key_exists($videoPath, $clips)) {
-            throw new RuntimeException("Replay eval fixture has no verdict for [{$videoPath}].");
+            throw new MissingReplayClipException("Replay eval fixture has no verdict for [{$videoPath}].");
         }
 
         $clip = $clips[$videoPath];

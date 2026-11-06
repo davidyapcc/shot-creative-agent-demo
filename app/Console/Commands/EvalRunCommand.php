@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use App\Contracts\JudgeInterface;
+use App\Exceptions\MissingReplayClipException;
 use App\Exceptions\ProviderRateLimitedException;
 use App\Jobs\JudgeVideoJob;
 use App\Models\EvalRun;
@@ -68,14 +69,20 @@ class EvalRunCommand extends Command
         $results = [];
         $stoppedEarly = false;
 
-        foreach ($clips as $clip) {
-            $outcome = $this->judgeClip($judge, $budget, $run, $cap, $driver, $clip, $stoppedEarly);
+        try {
+            foreach ($clips as $clip) {
+                $outcome = $this->judgeClip($judge, $budget, $run, $cap, $driver, $clip, $stoppedEarly);
 
-            if ($outcome === null) {
-                break;
+                if ($outcome === null) {
+                    break;
+                }
+
+                $results[] = $outcome;
             }
+        } catch (MissingReplayClipException $exception) {
+            $this->error($exception->getMessage());
 
-            $results[] = $outcome;
+            return self::FAILURE;
         }
 
         $hasError = false;
@@ -183,6 +190,8 @@ class EvalRunCommand extends Command
                 if ($refusals >= self::MAX_RATE_LIMIT_REFUSALS) {
                     return $this->errorResult($clip, $exception->getMessage());
                 }
+            } catch (MissingReplayClipException $exception) {
+                throw $exception;
             } catch (Throwable $exception) {
                 return $this->errorResult($clip, $exception->getMessage());
             }

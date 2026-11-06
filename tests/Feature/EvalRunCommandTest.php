@@ -200,6 +200,26 @@ class EvalRunCommandTest extends TestCase
         }
     }
 
+    public function test_a_missing_fixture_clip_fails_the_command_with_its_path(): void
+    {
+        Storage::fake('s3');
+        $this->seedClips();
+        $path = base_path('fixtures/replay/eval-judge.json');
+        $original = file_get_contents($path);
+        $fixture = json_decode((string) $original, true);
+        unset($fixture['clips']['evals/golden/warp-car.mp4']);
+        file_put_contents($path, json_encode($fixture));
+
+        try {
+            $this->artisan('eval:run', [
+                '--judge' => 'replay',
+                '--set' => 'golden',
+            ])->expectsOutputToContain('evals/golden/warp-car.mp4')->assertFailed();
+        } finally {
+            file_put_contents($path, (string) $original);
+        }
+    }
+
     public function test_unknown_tag_in_the_golden_set_exits_naming_the_clip(): void
     {
         $this->assertGoldenSetRejected(

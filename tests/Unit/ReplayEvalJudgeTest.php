@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Unit;
 
+use App\Exceptions\MissingReplayClipException;
 use App\Services\Providers\ReplayJudge;
-use RuntimeException;
 use Tests\TestCase;
 
 class ReplayEvalJudgeTest extends TestCase
@@ -42,7 +42,7 @@ class ReplayEvalJudgeTest extends TestCase
         $this->assertSame('Placeholder pass.', $verdict->reason);
     }
 
-    public function test_missing_eval_clip_fails_fast_with_its_path(): void
+    public function test_missing_clip_path_fails_fast(): void
     {
         $path = tempnam(sys_get_temp_dir(), 'eval-judge');
         file_put_contents($path, json_encode([
@@ -52,7 +52,7 @@ class ReplayEvalJudgeTest extends TestCase
 
         $judge = new ReplayJudge($path);
 
-        $this->expectException(RuntimeException::class);
+        $this->expectException(MissingReplayClipException::class);
         $this->expectExceptionMessage('evals/golden/missing.mp4');
 
         try {
