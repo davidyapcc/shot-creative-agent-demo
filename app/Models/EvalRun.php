@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\EvalRunStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -13,9 +14,13 @@ class EvalRun extends Model
 
     protected $fillable = [
         'judge_driver',
+        'judge_model',
+        'rubric_version',
         'dataset',
+        'status',
         'metrics',
         'results',
+        'ledger',
     ];
 
     protected function casts(): array
@@ -23,6 +28,8 @@ class EvalRun extends Model
         return [
             'metrics' => 'array',
             'results' => 'array',
+            'ledger' => 'array',
+            'status' => EvalRunStatus::class,
         ];
     }
 }

@@ -1,0 +1,66 @@
+{
+  "placeholder": true,
+  "note": "Hand-written stand-in, not a recording of a judge. It disagrees with the human labels on warp-car (false pass) and text-marquee (fails it with the wrong tag). Issue 14 replaces it with a real recording.",
+  "clips": {
+    "evals/golden/steady-street.mp4": {
+      "scores": {
+        "prompt_adherence": 5,
+        "anatomy": 5,
+        "object_integrity": 5,
+        "temporal_consistency": 5
+      },
+      "hard_fail_tags": [],
+      "reason": "Hand-written placeholder: the street holds still."
+    },
+    "evals/golden/steady-hands.mp4": {
+      "scores": {
+        "prompt_adherence": 5,
+        "anatomy": 5,
+        "object_integrity": 5,
+        "temporal_consistency": 5
+      },
+      "hard_fail_tags": [],
+      "reason": "Hand-written placeholder: the hands hold the cup."
+    },
+    "evals/golden/steady-sign.mp4": {
+      "scores": {
+        "prompt_adherence": 5,
+        "anatomy": 5,
+        "object_integrity": 5,
+        "temporal_consistency": 5
+      },
+      "hard_fail_tags": [],
+      "reason": "Hand-written placeholder: the sign reads cleanly."
+    },
+    "evals/golden/flicker-neon.mp4": {
+      "scores": {
+        "prompt_adherence": 5,
+        "anatomy": 5,
+        "object_integrity": 5,
+        "temporal_consistency": 1
+      },
+      "hard_fail_tags": ["temporal_flicker"],
+      "reason": "Hand-written placeholder: the neon flickers."
+    },
+    "evals/golden/warp-car.mp4": {
+      "scores": {
+        "prompt_adherence": 5,
+        "anatomy": 5,
+        "object_integrity": 5,
+        "temporal_consistency": 5
+      },
+      "hard_fail_tags": [],
+      "reason": "Hand-written placeholder: passes a warped car."
+    },
+    "evals/golden/text-marquee.mp4": {
+      "scores": {
+        "prompt_adherence": 5,
+        "anatomy": 5,
+        "object_integrity": 2,
+        "temporal_consistency": 5
+      },
+      "hard_fail_tags": ["object_warp"],
+      "reason": "Hand-written placeholder: blames the broken marquee letters on a warped object."
+    }
+  }
+}

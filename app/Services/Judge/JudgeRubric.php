@@ -45,6 +45,20 @@ class JudgeRubric
     private const MAX_SCORE = 5;
 
     /**
+     * Stable hash of the prompt and schema a judge sends. The shot plan is
+     * left blank so the hash stays the rubric, not one clip.
+     */
+    public function version(): string
+    {
+        return hash('sha256', json_encode([
+            'image_prompt' => $this->prompt(false, '', null),
+            'video_prompt' => $this->prompt(true, '', null),
+            'image_schema' => $this->schema(false),
+            'video_schema' => $this->schema(true),
+        ], JSON_THROW_ON_ERROR));
+    }
+
+    /**
      * @return list<string>
      */
     public function dimensions(bool $video): array

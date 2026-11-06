@@ -1,0 +1,44 @@
+[
+  {
+    "id": "steady-street",
+    "path": "evals/golden/steady-street.mp4",
+    "prompt": "A quiet street, camera locked off, no people.",
+    "verdict": "pass",
+    "tags": []
+  },
+  {
+    "id": "steady-hands",
+    "path": "evals/golden/steady-hands.mp4",
+    "prompt": "Two hands hold a cup still on a table.",
+    "verdict": "pass",
+    "tags": []
+  },
+  {
+    "id": "steady-sign",
+    "path": "evals/golden/steady-sign.mp4",
+    "prompt": "A shop sign is sharp and still, with no people in frame.",
+    "verdict": "pass",
+    "tags": []
+  },
+  {
+    "id": "flicker-neon",
+    "path": "evals/golden/flicker-neon.mp4",
+    "prompt": "A neon sign buzzes and the letters flicker between frames.",
+    "verdict": "fail",
+    "tags": ["temporal_flicker"]
+  },
+  {
+    "id": "warp-car",
+    "path": "evals/golden/warp-car.mp4",
+    "prompt": "A car drives past and its doors melt out of shape.",
+    "verdict": "fail",
+    "tags": ["object_warp"]
+  },
+  {
+    "id": "text-marquee",
+    "path": "evals/golden/text-marquee.mp4",
+    "prompt": "A marquee shows the words NIGHT MARKET and the letters break apart.",
+    "verdict": "fail",
+    "tags": ["text_artifact"]
+  }
+]
