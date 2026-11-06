@@ -1,0 +1,77 @@
+[
+  {
+    "id": "person-crossing",
+    "category": "people",
+    "prompt": "A person crosses a wet street at night and keeps walking."
+  },
+  {
+    "id": "person-profile",
+    "category": "people",
+    "prompt": "A person in profile turns toward the camera and stops."
+  },
+  {
+    "id": "person-crowd",
+    "category": "people",
+    "prompt": "One person walks out of a crowd and looks back."
+  },
+  {
+    "id": "hands-cup",
+    "category": "hands",
+    "prompt": "Two hands wrap around a hot cup and lift it."
+  },
+  {
+    "id": "hands-coin",
+    "category": "hands",
+    "prompt": "A hand flips a coin and catches it."
+  },
+  {
+    "id": "hands-keys",
+    "category": "hands",
+    "prompt": "Hands turn a key in a lock until the door opens."
+  },
+  {
+    "id": "car-corner",
+    "category": "vehicles",
+    "prompt": "A car turns a corner in the rain and continues down the street."
+  },
+  {
+    "id": "bike-lane",
+    "category": "vehicles",
+    "prompt": "A bicycle passes a parked truck and rides on."
+  },
+  {
+    "id": "bus-stop",
+    "category": "vehicles",
+    "prompt": "A bus pulls away from the curb and joins the lane."
+  },
+  {
+    "id": "sign-night-market",
+    "category": "text on signs",
+    "prompt": "A painted sign reads NIGHT MARKET and stays readable."
+  },
+  {
+    "id": "sign-platform",
+    "category": "text on signs",
+    "prompt": "A platform sign reads LINE 2 above the track."
+  },
+  {
+    "id": "sign-window",
+    "category": "text on signs",
+    "prompt": "A cafe window says OPEN LATE in white letters."
+  },
+  {
+    "id": "continuity-coat",
+    "category": "multi-shot continuity",
+    "prompt": "The same red coat walks from a doorway into the street."
+  },
+  {
+    "id": "continuity-cup",
+    "category": "multi-shot continuity",
+    "prompt": "The same blue cup is set down, then picked up again."
+  },
+  {
+    "id": "continuity-car",
+    "category": "multi-shot continuity",
+    "prompt": "The same yellow car is parked, then drives off."
+  }
+]

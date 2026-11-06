@@ -45,6 +45,21 @@ class JudgeRubric
     private const MAX_SCORE = 5;
 
     /**
+     * Stable hash of the rubric text and schema a judge sends.
+     */
+    public function version(): string
+    {
+        return hash('sha256', json_encode([
+            'image' => self::IMAGE_DIMENSIONS,
+            'video' => self::VIDEO_DIMENSIONS,
+            'tags' => self::HARD_FAIL_TAGS,
+            'checks' => self::CHECKS,
+            'min_score' => self::MIN_SCORE,
+            'max_score' => self::MAX_SCORE,
+        ], JSON_THROW_ON_ERROR));
+    }
+
+    /**
      * @return list<string>
      */
     public function dimensions(bool $video): array

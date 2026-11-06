@@ -34,6 +34,12 @@ class ReplayJudge implements JudgeInterface
 
     public function judgeVideo(string $videoPath, string $prompt, ?string $styleAnchor = null): JudgementResult
     {
+        $recorded = $this->recordedClip($videoPath);
+
+        if ($recorded !== null) {
+            return $recorded;
+        }
+
         return $this->scriptedFailure('video', $prompt) ?? new JudgementResult(
             scores: [
                 'prompt_adherence' => 5,
@@ -43,6 +49,41 @@ class ReplayJudge implements JudgeInterface
             ],
             hardFailTags: [],
             reason: 'Replay verdict: video adheres to prompt with no temporal flicker.',
+        );
+    }
+
+    /**
+     * Eval fixtures are keyed by clip path. Null means this is the pipeline
+     * prompt-prefix script, which is left to scriptedFailure.
+     */
+    private function recordedClip(string $videoPath): ?JudgementResult
+    {
+        $fixture = $this->fixture();
+
+        if (! array_key_exists('clips', $fixture)) {
+            return null;
+        }
+
+        $clips = $fixture['clips'];
+
+        if (! is_array($clips)) {
+            throw new RuntimeException("Replay eval fixture has a malformed [clips] entry: {$this->fixturePath}");
+        }
+
+        if (! array_key_exists($videoPath, $clips)) {
+            throw new RuntimeException("Replay eval fixture has no verdict for [{$videoPath}].");
+        }
+
+        $clip = $clips[$videoPath];
+
+        if (! $this->isValidFailure($clip)) {
+            throw new RuntimeException("Replay eval fixture has a malformed verdict for [{$videoPath}].");
+        }
+
+        return new JudgementResult(
+            scores: $clip['scores'],
+            hardFailTags: $clip['hard_fail_tags'],
+            reason: $clip['reason'],
         );
     }
 
