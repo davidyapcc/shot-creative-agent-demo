@@ -37,3 +37,23 @@ export async function fetchBrief(id)
 
   return json.data.brief;
 }
+
+export async function fetchTelemetry()
+{
+  const response = await fetch('/telemetry', {
+    headers: { 'Accept': 'application/json' },
+  });
+
+  if (!response.ok)
+  {
+    throw new Error('Failed to load quality telemetry');
+  }
+
+  const json = await response.json();
+  if (!json.success || !json.data)
+  {
+    throw new Error('Failed to load quality telemetry');
+  }
+
+  return json.data;
+}

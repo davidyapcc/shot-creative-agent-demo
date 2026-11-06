@@ -65,6 +65,53 @@ class Shot extends Model
     }
 
     /**
+     * Generations after the first image attempt and the first video attempt.
+     * Without step_attempts, attempts minus the stages the shot reached.
+     */
+    public function generationRetries(): int
+    {
+        $steps = $this->metadata['step_attempts'] ?? null;
+        if (is_array($steps)) {
+            $image = (int) ($steps['image'] ?? 0);
+            $video = (int) ($steps['video'] ?? 0);
+
+            return max(0, $image - 1) + max(0, $video - 1);
+        }
+
+        return max(0, (int) $this->attempts - $this->stagesReached());
+    }
+
+    /**
+     * A failed shot that kept its keyframe and ran again has entered video,
+     * even when that attempt never stored a clip.
+     */
+    private function stagesReached(): int
+    {
+        $image = filled($this->keyframe_path) || in_array($this->state, [
+            ShotState::JudgingImage,
+            ShotState::GeneratingVideo,
+            ShotState::JudgingVideo,
+            ShotState::Done,
+        ], true);
+
+        $video = filled($this->video_path) || in_array($this->state, [
+            ShotState::GeneratingVideo,
+            ShotState::JudgingVideo,
+            ShotState::Done,
+        ], true);
+
+        if (! $video && $this->state === ShotState::Failed && filled($this->keyframe_path) && (int) $this->attempts > 1) {
+            $video = true;
+        }
+
+        if (! $image && ! $video && (int) $this->attempts > 0) {
+            return 1;
+        }
+
+        return (int) $image + (int) $video;
+    }
+
+    /**
      * Move on after a provider call, unless the budget stop failed this shot
      * while the call was in flight. Returns false when the result must be dropped.
      */

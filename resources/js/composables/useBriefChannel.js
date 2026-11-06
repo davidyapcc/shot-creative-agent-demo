@@ -6,6 +6,7 @@ export function useBriefChannel(reportError)
 {
   let echo = null;
   let activeChannel = null;
+  let telemetryChannel = null;
 
   onMounted(() =>
   {
@@ -15,6 +16,7 @@ export function useBriefChannel(reportError)
   onBeforeUnmount(() =>
   {
     stopBriefChannel(activeChannel);
+    stopBriefChannel(telemetryChannel);
     if (echo)
     {
       echo.disconnect();
@@ -36,6 +38,16 @@ export function useBriefChannel(reportError)
 
   function subscribe(briefId, handlers)
   {
+    activeChannel = listen(`briefs.${briefId}`, handlers, activeChannel);
+  }
+
+  function subscribeTelemetry(handlers)
+  {
+    telemetryChannel = listen('telemetry', handlers, telemetryChannel);
+  }
+
+  function listen(name, handlers, current)
+  {
     if (!echo)
     {
       setupEcho();
@@ -43,13 +55,15 @@ export function useBriefChannel(reportError)
 
     if (!echo)
     {
-      return;
+      return current;
     }
 
-    stopBriefChannel(activeChannel);
-    activeChannel = echo.channel(`briefs.${briefId}`);
-    listenToBriefChannel(activeChannel, handlers);
+    stopBriefChannel(current);
+    const channel = echo.channel(name);
+    listenToBriefChannel(channel, handlers);
+
+    return channel;
   }
 
-  return { subscribe };
+  return { subscribe, subscribeTelemetry };
 }

@@ -3,7 +3,8 @@
 declare(strict_types=1);
 
 /*
- * Brief streams stay on public channels ("briefs.{id}").
+ * Brief streams stay on public channels ("briefs.{id}"), and the quality
+ * header listens on the public "telemetry" channel.
  *
  * This demo has no user model and no login. Laravel runs the callbacks
  * in this file only for private- and presence- channels, through

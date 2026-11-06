@@ -30,4 +30,9 @@ class RateLimitHitCounter
     {
         return (int) DB::table(self::TABLE)->where('step', $step)->value('hits');
     }
+
+    public function total(): int
+    {
+        return (int) DB::table(self::TABLE)->sum('hits');
+    }
 }

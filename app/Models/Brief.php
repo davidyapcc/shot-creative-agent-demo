@@ -26,6 +26,7 @@ class Brief extends Model
         'final_video_path',
         'budget_used',
         'metadata',
+        'completed_at',
     ];
 
     protected function casts(): array
@@ -34,16 +35,51 @@ class Brief extends Model
             'state' => BriefState::class,
             'metadata' => 'array',
             'budget_used' => 'integer',
+            'completed_at' => 'datetime',
         ];
     }
 
     protected static function booted(): void
     {
-        static::updated(function (Brief $brief): void {
-            if ($brief->wasChanged('state')) {
-                BriefStateChanged::dispatch($brief->id, $brief->getOriginal('state'), $brief->state);
+        static::updating(function (Brief $brief): void {
+            if (! $brief->isDirty('state') || ! $brief->state->isTerminal()) {
+                return;
             }
+
+            if ($brief->completed_at !== null) {
+                return;
+            }
+
+            $brief->completed_at = now();
         });
+
+        static::updated(function (Brief $brief): void {
+            if (! $brief->wasChanged('state')) {
+                return;
+            }
+
+            BriefStateChanged::dispatch($brief->id, $brief->getOriginal('state'), $brief->state);
+        });
+    }
+
+    /**
+     * Sum of ledger costs, or budget_used when the brief has no ledger.
+     */
+    public function costUnits(): float
+    {
+        $ledger = $this->metadata['budget_ledger'] ?? null;
+        if (! is_array($ledger)) {
+            return (float) $this->budget_used;
+        }
+
+        $sum = 0.0;
+        foreach ($ledger as $entry) {
+            if (is_array($entry)) {
+                $sum += (float) ($entry['cost'] ?? 0);
+            }
+        }
+
+        return $sum;
     }
 
     public function shots(): HasMany

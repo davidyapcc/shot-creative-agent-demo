@@ -10,6 +10,7 @@ use App\Exceptions\InvalidStateTransitionException;
 use App\Models\Brief;
 use App\Models\Shot;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 class StateMachineTest extends TestCase
@@ -51,6 +52,43 @@ class StateMachineTest extends TestCase
 
         $this->expectException(InvalidStateTransitionException::class);
         $brief->transitionTo(BriefState::Done);
+    }
+
+    public function test_terminal_transition_stamps_completed_at_and_a_pipeline_step_does_not(): void
+    {
+        Carbon::setTestNow('2026-11-06 01:00:00');
+
+        $pending = Brief::create([
+            'prompt' => 'A futuristic neon city in the rain',
+            'state' => BriefState::Pending,
+        ]);
+
+        $pending->transitionTo(BriefState::Planning);
+        $this->assertNull($pending->refresh()->completed_at);
+
+        $failed = Brief::create([
+            'prompt' => 'A futuristic neon city in the rain',
+            'state' => BriefState::Pending,
+        ]);
+        $failed->transitionTo(BriefState::Failed);
+
+        $degraded = Brief::create([
+            'prompt' => 'A futuristic neon city in the rain',
+            'state' => BriefState::Planning,
+        ]);
+        $degraded->transitionTo(BriefState::Degraded);
+
+        $done = Brief::create([
+            'prompt' => 'A futuristic neon city in the rain',
+            'state' => BriefState::Muxing,
+        ]);
+        $done->transitionTo(BriefState::Done);
+
+        $this->assertSame('2026-11-06 01:00:00', $failed->refresh()->completed_at?->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-06 01:00:00', $degraded->refresh()->completed_at?->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-06 01:00:00', $done->refresh()->completed_at?->format('Y-m-d H:i:s'));
+
+        Carbon::setTestNow();
     }
 
     public function test_brief_terminal_state_cannot_transition(): void
