@@ -5,25 +5,26 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use App\Contracts\JudgeInterface;
-use App\Exceptions\MissingReplayClipException;
-use App\Exceptions\ProviderRateLimitedException;
-use App\Jobs\JudgeVideoJob;
+use App\DTOs\EvalClipResult;
+use App\DTOs\GoldenClip;
+use App\Enums\EvalRunStatus;
 use App\Models\EvalRun;
 use App\Services\Budget;
 use App\Services\EvalBudget;
 use App\Services\EvalMetrics;
+use App\Services\EvalReport;
 use App\Services\GoldenSet;
 use App\Services\Judge\JudgeRubric;
 use App\Services\JudgeFactory;
-use Illuminate\Cache\RateLimiting\Unlimited;
+use App\Services\MeteredClipJudge;
+use App\Services\Providers\ReplayJudge;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\RateLimiter;
+use InvalidArgumentException;
 use RuntimeException;
-use Throwable;
 
 class EvalRunCommand extends Command
 {
-    private const MAX_RATE_LIMIT_REFUSALS = 3;
+    private const MIN_BUDGET = 1;
 
     protected $signature = 'eval:run
         {--judge= : Judge driver, defaulting to JUDGE_PROVIDER}
@@ -32,79 +33,37 @@ class EvalRunCommand extends Command
 
     protected $description = 'Score a judge against the golden set';
 
-    public function handle(JudgeFactory $judges, EvalBudget $budget): int
+    public function handle(JudgeFactory $judges, EvalBudget $budget, EvalReport $report): int
     {
-        $driver = $this->driver();
-
-        if ($this->option('set') !== 'golden') {
+        if ($this->option('set') !== GoldenSet::NAME) {
             $this->error('Only the golden set can be scored.');
 
             return self::FAILURE;
         }
 
+        $driver = $this->driver();
+
         try {
             $clips = GoldenSet::load(base_path('evals/golden.json'));
-            $judge = $driver === 'replay'
-                ? $judges->make('replay', base_path('fixtures/replay/eval-judge.json'))
-                : $judges->make($driver);
-        } catch (RuntimeException $exception) {
+            $cap = $this->cap(count($clips));
+            $judge = $this->judge($judges, $driver, $clips);
+            GoldenSet::seed($clips);
+        } catch (RuntimeException|InvalidArgumentException $exception) {
+            // Setup failures stop the command before an eval run exists or anything is charged.
             $this->error($exception->getMessage());
 
             return self::FAILURE;
         }
 
-        GoldenSet::seed($clips);
+        $run = $this->createRun($driver);
+        $results = $this->judgeAll(new MeteredClipJudge($judge, $budget, $run, $cap, $driver), $clips);
+        $this->finish($run, $results, count($clips), $budget->spent($run));
 
-        $cap = $this->cap($clips);
-        $run = EvalRun::query()->create([
-            'judge_driver' => $driver,
-            'judge_model' => $this->modelName($driver),
-            'rubric_version' => (new JudgeRubric)->version(),
-            'dataset' => 'golden',
-            'status' => 'partial',
-            'results' => [],
-            'ledger' => [],
-        ]);
-
-        $results = [];
-        $stoppedEarly = false;
-
-        try {
-            foreach ($clips as $clip) {
-                $outcome = $this->judgeClip($judge, $budget, $run, $cap, $driver, $clip, $stoppedEarly);
-
-                if ($outcome === null) {
-                    break;
-                }
-
-                $results[] = $outcome;
-            }
-        } catch (MissingReplayClipException $exception) {
-            $this->error($exception->getMessage());
-
-            return self::FAILURE;
+        if ($run->status === EvalRunStatus::Complete) {
+            $report->write($run, $results, base_path('evals/REPORT.md'));
         }
 
-        $hasError = false;
-
-        foreach ($results as $result) {
-            if ($result['verdict'] === 'error') {
-                $hasError = true;
-            }
-        }
-
-        $run->update([
-            'status' => ($stoppedEarly || $hasError) ? 'partial' : 'complete',
-            'results' => $results,
-            'metrics' => EvalMetrics::score($results, $budget->spent($run)),
-        ]);
-        $run->refresh();
-
-        if ($run->status === 'complete') {
-            $this->writeReport($run);
-        }
-
-        $this->info("Eval run {$run->id} is {$run->status}.");
+        $this->info("Eval run {$run->id} is {$run->status->value}.");
 
         return self::SUCCESS;
     }
@@ -114,24 +73,60 @@ class EvalRunCommand extends Command
         $driver = $this->option('judge');
 
         if (! is_string($driver) || $driver === '') {
-            $driver = (string) config('creative.judge.provider', 'replay');
+            return (string) config('creative.judge.provider', 'replay');
         }
 
         return $driver;
     }
 
-    /**
-     * @param  list<array{id: string, path: string, prompt: string, verdict: string, tags: list<string>}>  $clips
-     */
-    private function cap(array $clips): int
+    private function cap(int $clipCount): int
     {
         $option = $this->option('budget');
 
-        if ($option === null || $option === false || $option === '') {
-            return count($clips) * Budget::UNIT_COST;
+        if ($option === null || $option === '') {
+            return $clipCount * Budget::UNIT_COST;
         }
 
-        return (int) $option;
+        $cap = filter_var($option, FILTER_VALIDATE_INT, ['options' => ['min_range' => self::MIN_BUDGET]]);
+
+        if ($cap === false) {
+            throw new InvalidArgumentException(
+                '--budget must be a whole number of at least '.self::MIN_BUDGET.", [{$option}] given.",
+            );
+        }
+
+        return $cap;
+    }
+
+    /**
+     * @param  list<GoldenClip>  $clips
+     */
+    private function judge(JudgeFactory $judges, string $driver, array $clips): JudgeInterface
+    {
+        if ($driver !== 'replay') {
+            return $judges->make($driver);
+        }
+
+        $judge = $judges->make('replay', base_path('fixtures/replay/eval-judge.json'));
+
+        if ($judge instanceof ReplayJudge) {
+            $judge->assertRecorded(array_map(fn (GoldenClip $clip): string => $clip->path, $clips));
+        }
+
+        return $judge;
+    }
+
+    private function createRun(string $driver): EvalRun
+    {
+        return EvalRun::query()->create([
+            'judge_driver' => $driver,
+            'judge_model' => $this->modelName($driver),
+            'rubric_version' => (new JudgeRubric)->version(),
+            'dataset' => GoldenSet::NAME,
+            'status' => EvalRunStatus::Partial,
+            'results' => [],
+            'ledger' => [],
+        ]);
     }
 
     private function modelName(string $driver): string
@@ -139,190 +134,45 @@ class EvalRunCommand extends Command
         return match ($driver) {
             'gemini' => (string) config('creative.judge.gemini_model'),
             'openai' => (string) config('creative.judge.openai_model'),
-            default => 'replay',
+            default => $driver,
         };
     }
 
     /**
-     * @param  array{id: string, path: string, prompt: string, verdict: string, tags: list<string>}  $clip
-     * @return array<string, mixed>|null
+     * Judge clips in order until they run out or the budget does.
+     *
+     * @param  list<GoldenClip>  $clips
+     * @return list<EvalClipResult>
      */
-    private function judgeClip(
-        JudgeInterface $judge,
-        EvalBudget $budget,
-        EvalRun $run,
-        int $cap,
-        string $driver,
-        array $clip,
-        bool &$stoppedEarly,
-    ): ?array {
-        $refusals = 0;
+    private function judgeAll(MeteredClipJudge $judge, array $clips): array
+    {
+        $results = [];
 
-        while ($refusals < self::MAX_RATE_LIMIT_REFUSALS) {
-            if (! $budget->charge($run, $cap, $driver, 'judgeVideo', $clip['id'])) {
-                $stoppedEarly = true;
+        foreach ($clips as $clip) {
+            $result = $judge->judge($clip);
 
-                return null;
+            if ($result === null) {
+                break;
             }
 
-            $this->waitForJudgeSlot();
-
-            try {
-                $verdict = $judge->judgeVideo($clip['path'], $clip['prompt']);
-
-                return [
-                    'id' => $clip['id'],
-                    'path' => $clip['path'],
-                    'verdict' => $verdict->verdict()->value,
-                    'tags' => array_values($verdict->hardFailTags),
-                    'scores' => $verdict->scores,
-                    'reason' => $verdict->reason,
-                    'error' => null,
-                    'human' => [
-                        'verdict' => $clip['verdict'],
-                        'tags' => $clip['tags'],
-                    ],
-                ];
-            } catch (ProviderRateLimitedException $exception) {
-                $budget->refund($run, $driver, 'judgeVideo', $clip['id']);
-                $refusals++;
-
-                if ($refusals >= self::MAX_RATE_LIMIT_REFUSALS) {
-                    return $this->errorResult($clip, $exception->getMessage());
-                }
-            } catch (MissingReplayClipException $exception) {
-                throw $exception;
-            } catch (Throwable $exception) {
-                return $this->errorResult($clip, $exception->getMessage());
-            }
+            $results[] = $result;
         }
 
-        return $this->errorResult($clip, 'Judge was rate limited.');
+        return $results;
     }
 
     /**
-     * @param  array{id: string, path: string, prompt: string, verdict: string, tags: list<string>}  $clip
-     * @return array<string, mixed>
+     * @param  list<EvalClipResult>  $results
      */
-    private function errorResult(array $clip, string $message): array
+    private function finish(EvalRun $run, array $results, int $clipCount, int $spent): void
     {
-        return [
-            'id' => $clip['id'],
-            'path' => $clip['path'],
-            'verdict' => 'error',
-            'tags' => [],
-            'scores' => [],
-            'reason' => null,
-            'error' => $message,
-            'human' => [
-                'verdict' => $clip['verdict'],
-                'tags' => $clip['tags'],
-            ],
-        ];
-    }
+        $judgedEveryClip = count($results) === $clipCount;
+        $hasError = array_filter($results, fn (EvalClipResult $result): bool => $result->isError()) !== [];
 
-    private function waitForJudgeSlot(): void
-    {
-        $name = JudgeVideoJob::RATE_LIMITER;
-        $limiter = RateLimiter::limiter($name);
-
-        if ($limiter === null) {
-            return;
-        }
-
-        $limit = $limiter();
-
-        if ($limit instanceof Unlimited) {
-            return;
-        }
-
-        $key = md5($name.$limit->key);
-
-        while (RateLimiter::tooManyAttempts($key, $limit->maxAttempts)) {
-            $wait = RateLimiter::availableIn($key);
-            sleep($wait > 0 ? $wait : 1);
-        }
-
-        RateLimiter::hit($key, $limit->decaySeconds);
-    }
-
-    private function writeReport(EvalRun $run): void
-    {
-        $metrics = $run->metrics ?? [];
-        $lines = [
-            '# Eval report',
-            '',
-            '- Run: '.$run->id,
-            '- Driver: '.$run->judge_driver,
-            '- Model: '.$run->judge_model,
-            '- Rubric: '.$run->rubric_version,
-            '- Set: '.$run->dataset,
-            '- Status: '.$run->status,
-            '',
-            '## Metrics',
-            '',
-            '- Precision: '.$this->formatMetric($metrics['precision'] ?? null),
-            '- Recall: '.$this->formatMetric($metrics['recall'] ?? null),
-            '- Judge pass rate: '.$this->formatMetric($metrics['judge_pass_rate'] ?? null),
-            '- Cost units: '.($metrics['cost_units'] ?? 0),
-            '',
-            '## Per-tag recall',
-            '',
-        ];
-
-        foreach ($metrics['per_tag_recall'] ?? [] as $tag => $recall) {
-            $lines[] = '- '.$tag.': '.$this->formatMetric($recall);
-        }
-
-        $lines[] = '';
-        $lines[] = '## Disagreements';
-        $lines[] = '';
-
-        foreach ($run->results ?? [] as $result) {
-            if (! is_array($result) || ! $this->disagrees($result)) {
-                continue;
-            }
-
-            $humanTags = implode(', ', $result['human']['tags'] ?? []);
-            $judgeTags = implode(', ', $result['tags'] ?? []);
-            $lines[] = '- '.$result['id'].': human '.$result['human']['verdict']
-                .' ('.$humanTags.'), judge '.$result['verdict'].' ('.$judgeTags.')';
-        }
-
-        $directory = base_path('evals');
-
-        if (! is_dir($directory)) {
-            mkdir($directory, 0777, true);
-        }
-
-        file_put_contents($directory.'/REPORT.md', implode("\n", $lines)."\n");
-    }
-
-    private function disagrees(array $result): bool
-    {
-        if (($result['verdict'] ?? null) === 'error') {
-            return false;
-        }
-
-        $humanTags = $result['human']['tags'] ?? [];
-        $judgeTags = $result['tags'] ?? [];
-        sort($humanTags);
-        sort($judgeTags);
-
-        return ($result['verdict'] ?? null) !== ($result['human']['verdict'] ?? null)
-            || $humanTags !== $judgeTags;
-    }
-
-    private function formatMetric(mixed $value): string
-    {
-        if (is_string($value)) {
-            return $value;
-        }
-
-        if (is_int($value) || is_float($value)) {
-            return number_format((float) $value, 3, '.', '');
-        }
-
-        return 'n/a';
+        $run->update([
+            'status' => ($judgedEveryClip && ! $hasError) ? EvalRunStatus::Complete : EvalRunStatus::Partial,
+            'results' => array_map(fn (EvalClipResult $result): array => $result->toArray(), $results),
+            'metrics' => EvalMetrics::score($results, $spent),
+        ]);
     }
 }

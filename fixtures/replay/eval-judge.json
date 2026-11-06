@@ -1,6 +1,6 @@
 {
   "placeholder": true,
-  "note": "Hand-written stand-in, not a recording of a judge. It disagrees with the human labels on steady-sign (wrong tag) and warp-car (false pass). Issue 14 replaces it with a real recording.",
+  "note": "Hand-written stand-in, not a recording of a judge. It disagrees with the human labels on warp-car (false pass) and text-marquee (fails it with the wrong tag). Issue 14 replaces it with a real recording.",
   "clips": {
     "evals/golden/steady-street.mp4": {
       "scores": {
@@ -25,12 +25,12 @@
     "evals/golden/steady-sign.mp4": {
       "scores": {
         "prompt_adherence": 5,
-        "anatomy": 1,
+        "anatomy": 5,
         "object_integrity": 5,
         "temporal_consistency": 5
       },
-      "hard_fail_tags": ["anatomy"],
-      "reason": "Hand-written placeholder: marks a clean sign as an anatomy failure."
+      "hard_fail_tags": [],
+      "reason": "Hand-written placeholder: the sign reads cleanly."
     },
     "evals/golden/flicker-neon.mp4": {
       "scores": {
@@ -54,13 +54,13 @@
     },
     "evals/golden/text-marquee.mp4": {
       "scores": {
-        "prompt_adherence": 2,
+        "prompt_adherence": 5,
         "anatomy": 5,
-        "object_integrity": 5,
+        "object_integrity": 2,
         "temporal_consistency": 5
       },
-      "hard_fail_tags": ["text_artifact"],
-      "reason": "Hand-written placeholder: the marquee letters break."
+      "hard_fail_tags": ["object_warp"],
+      "reason": "Hand-written placeholder: blames the broken marquee letters on a warped object."
     }
   }
 }

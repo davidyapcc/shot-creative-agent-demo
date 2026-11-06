@@ -7,6 +7,7 @@ namespace App\Services\Providers;
 use App\Contracts\JudgeInterface;
 use App\DTOs\JudgementResult;
 use App\Exceptions\MissingReplayClipException;
+use App\Support\JsonFile;
 use RuntimeException;
 
 class ReplayJudge implements JudgeInterface
@@ -54,21 +55,31 @@ class ReplayJudge implements JudgeInterface
     }
 
     /**
+     * Fail fast, before any spend, when an eval fixture lacks a clip.
+     *
+     * @param  list<string>  $videoPaths
+     */
+    public function assertRecorded(array $videoPaths): void
+    {
+        $clips = $this->recordedClips() ?? [];
+
+        foreach ($videoPaths as $videoPath) {
+            if (! array_key_exists($videoPath, $clips)) {
+                throw new MissingReplayClipException("Replay eval fixture has no verdict for [{$videoPath}].");
+            }
+        }
+    }
+
+    /**
      * Eval fixtures are keyed by clip path. Null means this is the pipeline
      * prompt-prefix script, which is left to scriptedFailure.
      */
     private function recordedClip(string $videoPath): ?JudgementResult
     {
-        $fixture = $this->fixture();
+        $clips = $this->recordedClips();
 
-        if (! array_key_exists('clips', $fixture)) {
+        if ($clips === null) {
             return null;
-        }
-
-        $clips = $fixture['clips'];
-
-        if (! is_array($clips)) {
-            throw new RuntimeException("Replay eval fixture has a malformed [clips] entry: {$this->fixturePath}");
         }
 
         if (! array_key_exists($videoPath, $clips)) {
@@ -86,6 +97,24 @@ class ReplayJudge implements JudgeInterface
             hardFailTags: $clip['hard_fail_tags'],
             reason: $clip['reason'],
         );
+    }
+
+    /**
+     * @return array<mixed>|null
+     */
+    private function recordedClips(): ?array
+    {
+        $fixture = $this->fixture();
+
+        if (! array_key_exists('clips', $fixture)) {
+            return null;
+        }
+
+        if (! is_array($fixture['clips'])) {
+            throw new RuntimeException("Replay eval fixture has a malformed [clips] entry: {$this->fixturePath}");
+        }
+
+        return $fixture['clips'];
     }
 
     /**
@@ -120,23 +149,11 @@ class ReplayJudge implements JudgeInterface
     }
 
     /**
-     * @return array<string, mixed>
+     * @return array<mixed>
      */
     private function fixture(): array
     {
-        $contents = is_file($this->fixturePath) ? file_get_contents($this->fixturePath) : false;
-
-        if ($contents === false) {
-            throw new RuntimeException("Replay judge fixture is missing: {$this->fixturePath}");
-        }
-
-        $decoded = json_decode($contents, true);
-
-        if (! is_array($decoded)) {
-            throw new RuntimeException("Replay judge fixture is not valid JSON: {$this->fixturePath}");
-        }
-
-        return $decoded;
+        return JsonFile::decode($this->fixturePath, 'Replay judge fixture');
     }
 
     private function isValidFailure(mixed $failure): bool

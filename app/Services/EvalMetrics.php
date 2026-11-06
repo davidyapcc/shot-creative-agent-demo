@@ -4,14 +4,17 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\DTOs\EvalClipResult;
 use App\Services\Judge\JudgeRubric;
+use App\Support\MetricFormat;
+use Closure;
 
 class EvalMetrics
 {
     /**
      * Fail is the positive class. Error clips are left out.
      *
-     * @param  list<array<string, mixed>>  $results
+     * @param  list<EvalClipResult>  $results
      * @return array{
      *     precision: float|string,
      *     recall: float|string,
@@ -22,56 +25,21 @@ class EvalMetrics
      */
     public static function score(array $results, int $costUnits): array
     {
-        $scored = array_values(array_filter(
-            $results,
-            fn (array $result): bool => ($result['verdict'] ?? null) !== 'error',
-        ));
-
-        $judgeFails = array_values(array_filter(
-            $scored,
-            fn (array $result): bool => ($result['verdict'] ?? null) === 'fail',
-        ));
-
-        $humanFails = array_values(array_filter(
-            $scored,
-            fn (array $result): bool => ($result['human']['verdict'] ?? null) === 'fail',
-        ));
-
-        $truePositives = 0;
-
-        foreach ($judgeFails as $result) {
-            if (($result['human']['verdict'] ?? null) === 'fail') {
-                $truePositives++;
-            }
-        }
-
-        $recalled = 0;
-
-        foreach ($humanFails as $result) {
-            if (($result['verdict'] ?? null) === 'fail') {
-                $recalled++;
-            }
-        }
-
-        $passes = 0;
-
-        foreach ($scored as $result) {
-            if (($result['verdict'] ?? null) === 'pass') {
-                $passes++;
-            }
-        }
+        $scored = self::where($results, fn (EvalClipResult $result): bool => ! $result->isError());
+        $judgeFails = self::where($scored, fn (EvalClipResult $result): bool => $result->judgeFailed());
+        $humanFails = self::where($scored, fn (EvalClipResult $result): bool => $result->humanFailed());
 
         return [
-            'precision' => $judgeFails === [] ? 'n/a' : $truePositives / count($judgeFails),
-            'recall' => $humanFails === [] ? 'n/a' : $recalled / count($humanFails),
+            'precision' => self::share($judgeFails, fn (EvalClipResult $result): bool => $result->humanFailed()),
+            'recall' => self::share($humanFails, fn (EvalClipResult $result): bool => $result->judgeFailed()),
             'per_tag_recall' => self::perTagRecall($scored),
-            'judge_pass_rate' => $scored === [] ? 'n/a' : $passes / count($scored),
+            'judge_pass_rate' => self::share($scored, fn (EvalClipResult $result): bool => ! $result->judgeFailed()),
             'cost_units' => $costUnits,
         ];
     }
 
     /**
-     * @param  list<array<string, mixed>>  $scored
+     * @param  list<EvalClipResult>  $scored
      * @return array<string, float|string>
      */
     private static function perTagRecall(array $scored): array
@@ -79,28 +47,35 @@ class EvalMetrics
         $recall = [];
 
         foreach (JudgeRubric::HARD_FAIL_TAGS as $tag) {
-            $humanUsed = array_values(array_filter(
-                $scored,
-                fn (array $result): bool => in_array($tag, $result['human']['tags'] ?? [], true),
-            ));
-
-            if ($humanUsed === []) {
-                $recall[$tag] = 'n/a';
-
-                continue;
-            }
-
-            $hit = 0;
-
-            foreach ($humanUsed as $result) {
-                if (in_array($tag, $result['tags'] ?? [], true)) {
-                    $hit++;
-                }
-            }
-
-            $recall[$tag] = $hit / count($humanUsed);
+            $humanTagged = self::where($scored, fn (EvalClipResult $result): bool => $result->humanTagged($tag));
+            $recall[$tag] = self::share($humanTagged, fn (EvalClipResult $result): bool => $result->judgeTagged($tag));
         }
 
         return $recall;
+    }
+
+    /**
+     * @param  list<EvalClipResult>  $results
+     * @param  Closure(EvalClipResult): bool  $test
+     * @return list<EvalClipResult>
+     */
+    private static function where(array $results, Closure $test): array
+    {
+        return array_values(array_filter($results, $test));
+    }
+
+    /**
+     * Share of the results that pass the test, or n/a for an empty list.
+     *
+     * @param  list<EvalClipResult>  $results
+     * @param  Closure(EvalClipResult): bool  $test
+     */
+    private static function share(array $results, Closure $test): float|string
+    {
+        if ($results === []) {
+            return MetricFormat::NOT_APPLICABLE;
+        }
+
+        return count(self::where($results, $test)) / count($results);
     }
 }

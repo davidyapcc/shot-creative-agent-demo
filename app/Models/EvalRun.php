@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\EvalRunStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
@@ -28,6 +29,7 @@ class EvalRun extends Model
             'metrics' => 'array',
             'results' => 'array',
             'ledger' => 'array',
+            'status' => EvalRunStatus::class,
         ];
     }
 }

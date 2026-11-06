@@ -15,6 +15,12 @@ use InvalidArgumentException;
 
 class JudgeFactory
 {
+    private const MIN_VIDEO_FPS = 4;
+
+    private const MAX_VIDEO_FPS = 8;
+
+    private const MIN_MAX_FRAMES = 1;
+
     public function make(string $driver, ?string $replayFixture = null): JudgeInterface
     {
         return match ($driver) {
@@ -76,8 +82,10 @@ class JudgeFactory
     {
         $fps = (int) config('creative.judge.video_fps');
 
-        if ($fps < 4 || $fps > 8) {
-            throw new InvalidArgumentException("JUDGE_VIDEO_FPS must be from 4 to 8, [{$fps}] given.");
+        if ($fps < self::MIN_VIDEO_FPS || $fps > self::MAX_VIDEO_FPS) {
+            throw new InvalidArgumentException(
+                'JUDGE_VIDEO_FPS must be from '.self::MIN_VIDEO_FPS.' to '.self::MAX_VIDEO_FPS.", [{$fps}] given.",
+            );
         }
 
         return $fps;
@@ -87,8 +95,10 @@ class JudgeFactory
     {
         $maxFrames = (int) config('creative.judge.max_frames');
 
-        if ($maxFrames < 1) {
-            throw new InvalidArgumentException("JUDGE_MAX_FRAMES must be at least 1, [{$maxFrames}] given.");
+        if ($maxFrames < self::MIN_MAX_FRAMES) {
+            throw new InvalidArgumentException(
+                'JUDGE_MAX_FRAMES must be at least '.self::MIN_MAX_FRAMES.", [{$maxFrames}] given.",
+            );
         }
 
         return $maxFrames;

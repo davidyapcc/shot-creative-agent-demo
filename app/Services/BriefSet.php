@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Support\JsonFile;
 use RuntimeException;
 
 class BriefSet
@@ -21,18 +22,7 @@ class BriefSet
      */
     public static function load(string $path): array
     {
-        $contents = is_file($path) ? file_get_contents($path) : false;
-
-        if ($contents === false) {
-            throw new RuntimeException("Brief set is missing: {$path}");
-        }
-
-        $decoded = json_decode($contents, true);
-
-        if (! is_array($decoded)) {
-            throw new RuntimeException("Brief set is not valid JSON: {$path}");
-        }
-
+        $decoded = JsonFile::decode($path, 'Brief set');
         $briefs = [];
         $seen = [];
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use App\Models\EvalRun;
+use App\Support\MetricFormat;
 use Illuminate\Console\Command;
 
 class EvalDiffCommand extends Command
@@ -29,8 +30,8 @@ class EvalDiffCommand extends Command
         foreach (['precision', 'recall', 'judge_pass_rate', 'cost_units'] as $metric) {
             $this->line($this->metricLine(
                 $metric,
-                $left->metrics[$metric] ?? 'n/a',
-                $right->metrics[$metric] ?? 'n/a',
+                $left->metrics[$metric] ?? MetricFormat::NOT_APPLICABLE,
+                $right->metrics[$metric] ?? MetricFormat::NOT_APPLICABLE,
             ));
         }
 
@@ -42,8 +43,8 @@ class EvalDiffCommand extends Command
         foreach ($tags as $tag) {
             $this->line($this->metricLine(
                 $tag,
-                $left->metrics['per_tag_recall'][$tag] ?? 'n/a',
-                $right->metrics['per_tag_recall'][$tag] ?? 'n/a',
+                $left->metrics['per_tag_recall'][$tag] ?? MetricFormat::NOT_APPLICABLE,
+                $right->metrics['per_tag_recall'][$tag] ?? MetricFormat::NOT_APPLICABLE,
             ));
         }
 
@@ -75,42 +76,20 @@ class EvalDiffCommand extends Command
             $run->judge_model,
             $run->rubric_version,
             $run->dataset,
-            $run->status,
+            $run->status?->value,
         ]);
     }
 
     private function metricLine(string $name, mixed $left, mixed $right): string
     {
-        $line = $name.'  '.$this->format($left).' -> '.$this->format($right);
-        $delta = $this->delta($left, $right);
+        $line = $name.'  '.MetricFormat::format($left).' -> '.MetricFormat::format($right);
+        $delta = MetricFormat::delta($left, $right);
 
         if ($delta === null) {
             return $line;
         }
 
         return $line.'  ('.$delta.')';
-    }
-
-    private function format(mixed $value): string
-    {
-        if (is_string($value)) {
-            return $value;
-        }
-
-        if (is_int($value) || is_float($value)) {
-            return number_format((float) $value, 3, '.', '');
-        }
-
-        return 'n/a';
-    }
-
-    private function delta(mixed $left, mixed $right): ?string
-    {
-        if (! is_numeric($left) || ! is_numeric($right)) {
-            return null;
-        }
-
-        return sprintf('%+.3f', (float) $right - (float) $left);
     }
 
     /**

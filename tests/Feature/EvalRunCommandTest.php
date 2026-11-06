@@ -4,10 +4,20 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Contracts\JudgeInterface;
+use App\DTOs\JudgementResult;
+use App\Enums\EvalRunStatus;
 use App\Models\EvalRun;
+use App\Services\JudgeFactory;
+use App\Services\MeteredClipJudge;
+use Carbon\CarbonInterval;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Sleep;
+use PHPUnit\Framework\Attributes\DataProvider;
+use RuntimeException;
 use Tests\TestCase;
 
 class EvalRunCommandTest extends TestCase
@@ -28,22 +38,22 @@ class EvalRunCommandTest extends TestCase
 
             $run = EvalRun::query()->sole();
 
-            $this->assertSame('complete', $run->status);
+            $this->assertSame(EvalRunStatus::Complete, $run->status);
             $this->assertSame('replay', $run->judge_driver);
             $this->assertSame('replay', $run->judge_model);
             $this->assertSame('golden', $run->dataset);
             $this->assertSame(64, strlen((string) $run->rubric_version));
             $this->assertCount(6, $run->results);
             $this->assertCount(6, $run->ledger);
-            $this->assertEqualsWithDelta(2 / 3, $run->metrics['precision'], 0.0001);
+            $this->assertEqualsWithDelta(1, $run->metrics['precision'], 0.0001);
             $this->assertEqualsWithDelta(2 / 3, $run->metrics['recall'], 0.0001);
-            $this->assertEqualsWithDelta(0.5, $run->metrics['judge_pass_rate'], 0.0001);
+            $this->assertEqualsWithDelta(2 / 3, $run->metrics['judge_pass_rate'], 0.0001);
             $this->assertSame(6, $run->metrics['cost_units']);
             $this->assertSame('n/a', $run->metrics['per_tag_recall']['anatomy']);
             $this->assertSame('n/a', $run->metrics['per_tag_recall']['scene_mismatch']);
             $this->assertEqualsWithDelta(0, $run->metrics['per_tag_recall']['object_warp'], 0.0001);
             $this->assertEqualsWithDelta(1, $run->metrics['per_tag_recall']['temporal_flicker'], 0.0001);
-            $this->assertEqualsWithDelta(1, $run->metrics['per_tag_recall']['text_artifact'], 0.0001);
+            $this->assertEqualsWithDelta(0, $run->metrics['per_tag_recall']['text_artifact'], 0.0001);
 
             $warp = collect($run->results)->firstWhere('id', 'warp-car');
             $this->assertSame('pass', $warp['verdict']);
@@ -53,10 +63,14 @@ class EvalRunCommandTest extends TestCase
             $this->assertSame(['object_warp'], $warp['human']['tags']);
             $this->assertNotSame('', $warp['reason']);
 
+            $marquee = collect($run->results)->firstWhere('id', 'text-marquee');
+            $this->assertSame('fail', $marquee['verdict']);
+            $this->assertSame(['object_warp'], $marquee['tags']);
+            $this->assertSame('fail', $marquee['human']['verdict']);
+            $this->assertSame(['text_artifact'], $marquee['human']['tags']);
+
             $sign = collect($run->results)->firstWhere('id', 'steady-sign');
-            $this->assertSame('fail', $sign['verdict']);
-            $this->assertSame(['anatomy'], $sign['tags']);
-            $this->assertSame('pass', $sign['human']['verdict']);
+            $this->assertSame('pass', $sign['verdict']);
 
             foreach ([
                 'evals/golden/steady-street.mp4',
@@ -74,8 +88,9 @@ class EvalRunCommandTest extends TestCase
             $this->assertStringContainsString((string) $run->id, $written);
             $this->assertStringContainsString('replay', $written);
             $this->assertStringContainsString((string) $run->rubric_version, $written);
-            $this->assertStringContainsString('steady-sign', $written);
+            $this->assertStringContainsString('text-marquee', $written);
             $this->assertStringContainsString('warp-car', $written);
+            $this->assertStringNotContainsString('steady-sign', $written);
             $this->assertStringContainsString('n/a', $written);
 
             $fixture = file_get_contents(base_path('fixtures/replay/eval-judge.json'));
@@ -103,7 +118,7 @@ class EvalRunCommandTest extends TestCase
 
             $run = EvalRun::query()->sole();
 
-            $this->assertSame('partial', $run->status);
+            $this->assertSame(EvalRunStatus::Partial, $run->status);
             $this->assertSame(
                 ['steady-street', 'steady-hands', 'steady-sign'],
                 array_column($run->results, 'id'),
@@ -122,6 +137,7 @@ class EvalRunCommandTest extends TestCase
         $this->seedClips();
         config([
             'services.gemini.key' => 'gemini-key',
+            'creative.judge.gemini_model' => 'gemini-3.5-flash-lite',
             'creative.judge.video_fps' => 6,
             'creative.judge.requests_per_minute' => 100,
         ]);
@@ -136,7 +152,7 @@ class EvalRunCommandTest extends TestCase
 
         $run = EvalRun::query()->sole();
 
-        $this->assertSame('partial', $run->status);
+        $this->assertSame(EvalRunStatus::Partial, $run->status);
         $this->assertCount(6, $run->results);
 
         foreach ($run->results as $result) {
@@ -151,12 +167,14 @@ class EvalRunCommandTest extends TestCase
         Http::assertSentCount(6);
     }
 
-    public function test_a_rate_limit_refunds_the_clip_and_errors_after_three_refusals(): void
+    public function test_a_rate_limit_refunds_waits_and_errors_after_three_refusals(): void
     {
+        Sleep::fake();
         Storage::fake('s3');
         $this->seedClips();
         config([
             'services.gemini.key' => 'gemini-key',
+            'creative.judge.gemini_model' => 'gemini-3.5-flash-lite',
             'creative.judge.video_fps' => 6,
             'creative.judge.requests_per_minute' => 100,
         ]);
@@ -171,7 +189,7 @@ class EvalRunCommandTest extends TestCase
 
         $run = EvalRun::query()->sole();
 
-        $this->assertSame('partial', $run->status);
+        $this->assertSame(EvalRunStatus::Partial, $run->status);
         $this->assertSame([], $run->ledger);
         $this->assertSame(0, $run->metrics['cost_units']);
 
@@ -181,6 +199,10 @@ class EvalRunCommandTest extends TestCase
         }
 
         Http::assertSentCount(18);
+        Sleep::assertSlept(
+            fn (CarbonInterval $duration): bool => (int) $duration->totalSeconds === MeteredClipJudge::RATE_LIMIT_BACKOFF_SECONDS,
+            12,
+        );
     }
 
     public function test_judge_defaults_to_the_configured_provider(): void
@@ -215,9 +237,104 @@ class EvalRunCommandTest extends TestCase
                 '--judge' => 'replay',
                 '--set' => 'golden',
             ])->expectsOutputToContain('evals/golden/warp-car.mp4')->assertFailed();
+
+            $this->assertSame(0, EvalRun::query()->count());
         } finally {
             file_put_contents($path, (string) $original);
         }
+    }
+
+    public function test_one_error_clip_is_left_out_of_the_scored_metrics(): void
+    {
+        Storage::fake('s3');
+        $this->seedClips();
+        $this->app->instance(JudgeFactory::class, $this->stubJudges(new class implements JudgeInterface
+        {
+            public function judgeImage(string $imagePath, string $prompt, ?string $styleAnchor = null): JudgementResult
+            {
+                throw new RuntimeException('Images are not judged in evals.');
+            }
+
+            public function judgeVideo(string $videoPath, string $prompt, ?string $styleAnchor = null): JudgementResult
+            {
+                return match ($videoPath) {
+                    'evals/golden/warp-car.mp4' => throw new RuntimeException('Judge broke on this clip.'),
+                    'evals/golden/flicker-neon.mp4' => new JudgementResult(['temporal_consistency' => 1], ['temporal_flicker']),
+                    'evals/golden/text-marquee.mp4' => new JudgementResult(['prompt_adherence' => 1], ['text_artifact']),
+                    default => new JudgementResult(['prompt_adherence' => 5]),
+                };
+            }
+        }));
+
+        $this->artisan('eval:run', ['--judge' => 'stub', '--set' => 'golden'])->assertSuccessful();
+
+        $run = EvalRun::query()->sole();
+        $warp = collect($run->results)->firstWhere('id', 'warp-car');
+
+        $this->assertSame(EvalRunStatus::Partial, $run->status);
+        $this->assertCount(6, $run->results);
+        $this->assertSame('error', $warp['verdict']);
+        $this->assertSame('Judge broke on this clip.', $warp['error']);
+        $this->assertEqualsWithDelta(1, $run->metrics['precision'], 0.0001);
+        $this->assertEqualsWithDelta(1, $run->metrics['recall'], 0.0001);
+        $this->assertEqualsWithDelta(3 / 5, $run->metrics['judge_pass_rate'], 0.0001);
+        $this->assertSame('n/a', $run->metrics['per_tag_recall']['object_warp']);
+        $this->assertSame(6, $run->metrics['cost_units']);
+    }
+
+    public function test_an_unknown_judge_driver_fails_cleanly_without_a_run(): void
+    {
+        $this->artisan('eval:run', ['--judge' => 'nope', '--set' => 'golden'])
+            ->expectsOutputToContain('Unsupported judge provider [nope].')
+            ->assertFailed();
+
+        $this->assertSame(0, EvalRun::query()->count());
+    }
+
+    public function test_a_missing_judge_key_fails_cleanly_without_a_run(): void
+    {
+        config(['services.gemini.key' => null]);
+
+        $this->artisan('eval:run', ['--judge' => 'gemini', '--set' => 'golden'])
+            ->expectsOutputToContain('GEMINI_API_KEY is required')
+            ->assertFailed();
+
+        $this->assertSame(0, EvalRun::query()->count());
+    }
+
+    public function test_a_failed_clip_render_fails_cleanly_without_a_run(): void
+    {
+        Storage::fake('s3');
+        Process::fake(['*' => Process::result(errorOutput: 'ffmpeg exploded', exitCode: 1)]);
+
+        $this->artisan('eval:run', ['--judge' => 'replay', '--set' => 'golden'])
+            ->expectsOutputToContain('ffmpeg exploded')
+            ->assertFailed();
+
+        $this->assertSame(0, EvalRun::query()->count());
+    }
+
+    #[DataProvider('invalidBudgets')]
+    public function test_an_invalid_budget_fails_without_a_run(string $budget): void
+    {
+        $this->artisan('eval:run', ['--judge' => 'replay', '--set' => 'golden', '--budget' => $budget])
+            ->expectsOutputToContain('--budget must be a whole number of at least 1')
+            ->assertFailed();
+
+        $this->assertSame(0, EvalRun::query()->count());
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function invalidBudgets(): array
+    {
+        return [
+            'not a number' => ['abc'],
+            'zero' => ['0'],
+            'negative' => ['-2'],
+            'fraction' => ['1.5'],
+        ];
     }
 
     public function test_unknown_tag_in_the_golden_set_exits_naming_the_clip(): void
@@ -250,7 +367,7 @@ class EvalRunCommandTest extends TestCase
 
     public function test_diff_prints_both_configs_metric_deltas_and_verdict_changes(): void
     {
-        $first = $this->storedRun('replay', 'replay', 'complete', [
+        $first = $this->storedRun('replay', 'replay', EvalRunStatus::Complete, [
             'precision' => 0.5,
             'recall' => 0.5,
             'judge_pass_rate' => 0.5,
@@ -265,7 +382,7 @@ class EvalRunCommandTest extends TestCase
             ['id' => 'flicker-neon', 'verdict' => 'fail'],
         ], str_repeat('a', 64));
 
-        $second = $this->storedRun('gemini', 'gemini-3.5-flash-lite', 'partial', [
+        $second = $this->storedRun('gemini', 'gemini-3.5-flash-lite', EvalRunStatus::Partial, [
             'precision' => 1,
             'recall' => 0.5,
             'judge_pass_rate' => 1,
@@ -313,6 +430,19 @@ class EvalRunCommandTest extends TestCase
         }
     }
 
+    private function stubJudges(JudgeInterface $judge): JudgeFactory
+    {
+        return new class($judge) extends JudgeFactory
+        {
+            public function __construct(private readonly JudgeInterface $judge) {}
+
+            public function make(string $driver, ?string $replayFixture = null): JudgeInterface
+            {
+                return $this->judge;
+            }
+        };
+    }
+
     private function seedClips(): void
     {
         $clips = json_decode((string) file_get_contents(base_path('evals/golden.json')), true);
@@ -329,7 +459,7 @@ class EvalRunCommandTest extends TestCase
     private function storedRun(
         string $driver,
         string $model,
-        string $status,
+        EvalRunStatus $status,
         array $metrics,
         array $results,
         string $rubricVersion,

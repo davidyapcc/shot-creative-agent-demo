@@ -4,70 +4,67 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\Services\Judge\JudgeRubric;
+use App\DTOs\GoldenClip;
+use App\Support\JsonFile;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
 class GoldenSet
 {
+    /** The set name stored on an eval run and passed to `--set`. */
+    public const NAME = 'golden';
+
+    /** Seeded clips are solid colours, one per clip, cycling if the set grows. */
+    private const CLIP_COLORS = ['red', 'green', 'blue', 'yellow', 'purple', 'orange'];
+
+    private const CLIP_SIZE = '160x120';
+
+    private const CLIP_SECONDS = 1;
+
+    private const RENDER_TIMEOUT_SECONDS = 15;
+
     /**
-     * @return list<array{id: string, path: string, prompt: string, verdict: string, tags: list<string>}>
+     * @return list<GoldenClip>
      */
     public static function load(string $path): array
     {
-        $contents = is_file($path) ? file_get_contents($path) : false;
-
-        if ($contents === false) {
-            throw new RuntimeException("Golden set is missing: {$path}");
-        }
-
-        $decoded = json_decode($contents, true);
-
-        if (! is_array($decoded)) {
-            throw new RuntimeException("Golden set is not valid JSON: {$path}");
-        }
-
-        $clips = [];
-
-        foreach ($decoded as $entry) {
-            $clips[] = self::clip($entry);
-        }
-
-        return $clips;
+        return array_map(
+            fn (mixed $entry): GoldenClip => GoldenClip::fromArray($entry),
+            array_values(JsonFile::decode($path, 'Golden set')),
+        );
     }
 
     /**
      * Write any missing clip under the existing bucket. Safe to call again.
      *
-     * @param  list<array{id: string, path: string, prompt: string, verdict: string, tags: list<string>}>  $clips
+     * @param  list<GoldenClip>  $clips
      */
     public static function seed(array $clips): void
     {
         foreach ($clips as $index => $clip) {
-            if (Storage::disk('s3')->exists($clip['path'])) {
+            if (Storage::disk('s3')->exists($clip->path)) {
                 continue;
             }
 
-            Storage::disk('s3')->put($clip['path'], self::render($index));
+            Storage::disk('s3')->put($clip->path, self::render($index));
         }
     }
 
     private static function render(int $index): string
     {
-        $colors = ['red', 'green', 'blue', 'yellow', 'purple', 'orange'];
-        $color = $colors[$index % count($colors)];
+        $color = self::CLIP_COLORS[$index % count(self::CLIP_COLORS)];
         $temp = tempnam(sys_get_temp_dir(), 'golden');
         $video = $temp.'.mp4';
         rename($temp, $video);
 
-        $process = Process::timeout(15)->run([
+        $process = Process::timeout(self::RENDER_TIMEOUT_SECONDS)->run([
             'ffmpeg', '-y',
             '-f', 'lavfi',
-            '-i', "color=c={$color}:s=160x120:d=1",
+            '-i', 'color=c='.$color.':s='.self::CLIP_SIZE.':d='.self::CLIP_SECONDS,
             '-c:v', 'libx264',
             '-pix_fmt', 'yuv420p',
-            '-t', '1',
+            '-t', (string) self::CLIP_SECONDS,
             $video,
         ]);
 
@@ -82,60 +79,5 @@ class GoldenSet
         }
 
         return $bytes;
-    }
-
-    /**
-     * @return array{id: string, path: string, prompt: string, verdict: string, tags: list<string>}
-     */
-    private static function clip(mixed $entry): array
-    {
-        if (! is_array($entry)) {
-            throw new RuntimeException('Golden set has an entry that is not a clip.');
-        }
-
-        $id = $entry['id'] ?? null;
-
-        if (! is_string($id) || $id === '') {
-            throw new RuntimeException('Golden set has a clip with no id.');
-        }
-
-        $path = $entry['path'] ?? null;
-        $prompt = $entry['prompt'] ?? null;
-        $verdict = $entry['verdict'] ?? null;
-        $tags = $entry['tags'] ?? null;
-
-        if (! is_string($path) || $path === '' || ! is_string($prompt) || $prompt === '') {
-            throw new RuntimeException("Golden clip {$id} is missing a path or prompt.");
-        }
-
-        if (! is_string($verdict) || ! in_array($verdict, ['pass', 'fail'], true)) {
-            $shown = is_string($verdict) ? $verdict : get_debug_type($verdict);
-
-            throw new RuntimeException("Golden clip {$id} has an unknown verdict [{$shown}].");
-        }
-
-        if (! is_array($tags)) {
-            throw new RuntimeException("Golden clip {$id} has tags that are not a list.");
-        }
-
-        $parsedTags = [];
-
-        foreach ($tags as $tag) {
-            if (! is_string($tag) || ! in_array($tag, JudgeRubric::HARD_FAIL_TAGS, true)) {
-                $shown = is_string($tag) ? $tag : get_debug_type($tag);
-
-                throw new RuntimeException("Golden clip {$id} has an unknown tag [{$shown}].");
-            }
-
-            $parsedTags[] = $tag;
-        }
-
-        return [
-            'id' => $id,
-            'path' => $path,
-            'prompt' => $prompt,
-            'verdict' => $verdict,
-            'tags' => $parsedTags,
-        ];
     }
 }
