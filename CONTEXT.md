@@ -25,3 +25,11 @@ _Avoid_: Benchmark run, eval job
 **Brief set**:
 A fixed collection of briefs covering hard subjects (people, hands, vehicles, text on signs, multi-shot continuity), kept for end-to-end agent runs.
 _Avoid_: Test briefs, prompt set
+
+**Judge**:
+The model that gives a clip a pass or fail verdict, with failure tags, against the rubric.
+_Avoid_: Grader, critic
+
+**Judge agreement**:
+The share of golden clips on which two eval runs with different judges give the same verdict, counting only clips both judges gave a verdict on.
+_Avoid_: Inter-rater reliability, consensus
