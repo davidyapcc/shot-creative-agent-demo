@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Models\EvalRun;
 use App\Support\MetricFormat;
+use Closure;
 use RuntimeException;
 
 /**
@@ -139,13 +140,7 @@ class JudgeAgreementReport
 
     private function headingOffset(string $existing): ?int
     {
-        $heading = preg_quote(self::HEADING, '/');
-
-        if (preg_match('/^'.$heading.'$/m', $existing, $matches, PREG_OFFSET_CAPTURE) !== 1) {
-            return null;
-        }
-
-        return $matches[0][1];
+        return $this->findLine($existing, 0, fn (string $line): bool => $line === self::HEADING);
     }
 
     private function nextHeadingOffset(string $existing, int $start): ?int
@@ -153,10 +148,59 @@ class JudgeAgreementReport
         $lineEnd = strpos($existing, "\n", $start);
         $from = $lineEnd === false ? strlen($existing) : $lineEnd + 1;
 
-        if (preg_match('/^## /m', $existing, $matches, PREG_OFFSET_CAPTURE, $from) !== 1) {
+        return $this->findLine($existing, $from, fn (string $line): bool => str_starts_with($line, '## '));
+    }
+
+    /**
+     * @param  Closure(string): bool  $matches
+     */
+    private function findLine(string $existing, int $from, Closure $matches): ?int
+    {
+        $offset = 0;
+        $fence = null;
+
+        while ($offset <= strlen($existing)) {
+            $newline = strpos($existing, "\n", $offset);
+            $end = $newline === false ? strlen($existing) : $newline;
+            $line = rtrim(substr($existing, $offset, $end - $offset), "\r");
+
+            if ($fence === null) {
+                $opened = $this->openingFence($line);
+
+                if ($opened !== null) {
+                    $fence = $opened;
+                } elseif ($offset >= $from && $matches($line)) {
+                    return $offset;
+                }
+            } elseif ($this->closesFence($line, $fence)) {
+                $fence = null;
+            }
+
+            if ($newline === false) {
+                break;
+            }
+
+            $offset = $newline + 1;
+        }
+
+        return null;
+    }
+
+    private function openingFence(string $line): ?string
+    {
+        if (preg_match('/^(```+|~~~+)/', $line, $matches) !== 1) {
             return null;
         }
 
-        return $matches[0][1];
+        return $matches[1];
+    }
+
+    private function closesFence(string $line, string $marker): bool
+    {
+        if (preg_match('/^(```+|~~~+)\s*$/', $line, $matches) !== 1) {
+            return false;
+        }
+
+        return $matches[1][0] === $marker[0] && strlen($matches[1]) >= strlen($marker);
     }
 }

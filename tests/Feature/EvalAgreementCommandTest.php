@@ -261,6 +261,78 @@ class EvalAgreementCommandTest extends TestCase
         }
     }
 
+    public function test_a_heading_inside_a_code_block_does_not_end_the_section(): void
+    {
+        $report = base_path('evals/REPORT.md');
+        $previous = is_file($report) ? file_get_contents($report) : null;
+        $prefix = "# Eval report\n\n";
+        $fenced = "```\n## Inside the fence\n```\n";
+        $suffix = "## Disagreements\n\n- warp-car: human fail (object_warp)\n";
+        file_put_contents(
+            $report,
+            $prefix."## Judge agreement\n\n".$fenced."\n- Agreement rate: 0.000\n\n".$suffix,
+        );
+        $rubric = str_repeat('c', 64);
+        $left = $this->storedRun('gemini', 'gemini-3.5-flash-lite', $rubric, 'golden', [
+            $this->clip('steady-street', 'pass', [], 'pass', []),
+        ], []);
+        $right = $this->storedRun('openai', 'gpt-5.4-mini', $rubric, 'golden', [
+            $this->clip('steady-street', 'pass', [], 'pass', []),
+        ], []);
+
+        try {
+            $this->assertSame(0, Artisan::call('eval:agreement', [
+                'runA' => $left->id,
+                'runB' => $right->id,
+            ]));
+
+            $after = file_get_contents($report);
+
+            $this->assertIsString($after);
+            $this->assertStringStartsWith($prefix, $after);
+            $this->assertStringEndsWith($suffix, $after);
+            $this->assertStringNotContainsString('0.000', $after);
+            $this->assertStringNotContainsString($fenced, $after);
+            $this->assertStringContainsString('- Agreement rate: 1.000', $after);
+        } finally {
+            $this->restoreReport($report, $previous);
+        }
+    }
+
+    public function test_a_windows_heading_is_replaced_and_the_other_sections_keep_their_bytes(): void
+    {
+        $report = base_path('evals/REPORT.md');
+        $previous = is_file($report) ? file_get_contents($report) : null;
+        $prefix = "# Eval report\r\n\r\n## Metrics\r\n\r\n- Precision: 1.000\r\n\r\n";
+        $suffix = "## Disagreements\r\n\r\n- warp-car: human fail (object_warp)\r\n";
+        file_put_contents($report, $prefix."## Judge agreement\r\n\r\n- Agreement rate: 0.000\r\n\r\n".$suffix);
+        $rubric = str_repeat('c', 64);
+        $left = $this->storedRun('gemini', 'gemini-3.5-flash-lite', $rubric, 'golden', [
+            $this->clip('steady-street', 'pass', [], 'pass', []),
+        ], []);
+        $right = $this->storedRun('openai', 'gpt-5.4-mini', $rubric, 'golden', [
+            $this->clip('steady-street', 'pass', [], 'pass', []),
+        ], []);
+
+        try {
+            $this->assertSame(0, Artisan::call('eval:agreement', [
+                'runA' => $left->id,
+                'runB' => $right->id,
+            ]));
+
+            $after = file_get_contents($report);
+
+            $this->assertIsString($after);
+            $this->assertStringStartsWith($prefix, $after);
+            $this->assertStringEndsWith($suffix, $after);
+            $this->assertStringNotContainsString('0.000', $after);
+            $this->assertStringContainsString('- Agreement rate: 1.000', $after);
+            $this->assertSame(1, substr_count($after, '## Judge agreement'));
+        } finally {
+            $this->restoreReport($report, $previous);
+        }
+    }
+
     public function test_a_report_without_the_section_keeps_its_bytes_and_gains_judge_agreement(): void
     {
         $report = base_path('evals/REPORT.md');
