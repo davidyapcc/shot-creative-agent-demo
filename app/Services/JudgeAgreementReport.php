@@ -141,7 +141,7 @@ class JudgeAgreementReport
     {
         $heading = preg_quote(self::HEADING, '/');
 
-        if (preg_match('/^'.$heading.'[^\n]*$/m', $existing, $matches, PREG_OFFSET_CAPTURE) !== 1) {
+        if (preg_match('/^'.$heading.'$/m', $existing, $matches, PREG_OFFSET_CAPTURE) !== 1) {
             return null;
         }
 
