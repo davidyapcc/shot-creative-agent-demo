@@ -6,10 +6,13 @@ namespace App\Console\Commands;
 
 use App\Models\EvalRun;
 use App\Support\MetricFormat;
+use App\Traits\FindsEvalRun;
 use Illuminate\Console\Command;
 
 class EvalDiffCommand extends Command
 {
+    use FindsEvalRun;
+
     protected $signature = 'eval:diff {runA} {runB}';
 
     protected $description = 'Compare two eval runs';
@@ -56,17 +59,6 @@ class EvalDiffCommand extends Command
         }
 
         return self::SUCCESS;
-    }
-
-    private function findRun(mixed $id): ?EvalRun
-    {
-        $run = EvalRun::query()->find($id);
-
-        if ($run === null) {
-            $this->error("Eval run {$id} was not found.");
-        }
-
-        return $run;
     }
 
     private function header(EvalRun $run): string
