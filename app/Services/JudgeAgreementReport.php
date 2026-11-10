@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\EvalRun;
+use App\Support\MarkdownSection;
 use App\Support\MetricFormat;
-use Closure;
 use RuntimeException;
 
 /**
@@ -27,7 +27,7 @@ class JudgeAgreementReport
             '- Rubric: '.$left->rubric_version,
             '- Golden set: '.$left->dataset,
             '- Clips compared: '.$agreement->compared,
-            ...$this->leftOut($agreement),
+            ...$this->clipsLeftOut($agreement),
             '- Agreement rate: '.MetricFormat::format($agreement->rate),
             ...$this->disagreements($left, $right, $agreement),
         ];
@@ -35,27 +35,39 @@ class JudgeAgreementReport
         return implode("\n", $lines)."\n";
     }
 
+    /**
+     * Replaces the judge-agreement section of the report at `$path`, or creates
+     * the report with only that section.
+     *
+     * @throws RuntimeException when the report cannot be read or written
+     */
     public function write(string $path, string $section): void
     {
         $directory = dirname($path);
 
-        if (! is_dir($directory)) {
-            mkdir($directory, 0777, true);
+        if (! is_dir($directory) && ! @mkdir($directory, 0777, true) && ! is_dir($directory)) {
+            throw $this->failure("Could not create {$directory}");
         }
 
-        if (! is_file($path)) {
-            file_put_contents($path, $section);
-
-            return;
-        }
-
-        $existing = file_get_contents($path);
+        $existing = is_file($path) ? @file_get_contents($path) : '';
 
         if ($existing === false) {
-            throw new RuntimeException("Could not read {$path}.");
+            throw $this->failure("Could not read {$path}");
         }
 
-        file_put_contents($path, $this->replace($existing, $section));
+        if (@file_put_contents($path, MarkdownSection::replace($existing, self::HEADING, $section)) === false) {
+            throw $this->failure("Could not write {$path}");
+        }
+    }
+
+    /**
+     * Keeps the filesystem's own reason, which the `@` above held back from a warning.
+     */
+    private function failure(string $what): RuntimeException
+    {
+        $reason = error_get_last()['message'] ?? null;
+
+        return new RuntimeException($reason === null ? "{$what}." : "{$what}: {$reason}");
     }
 
     private function runLine(EvalRun $run): string
@@ -66,15 +78,15 @@ class JudgeAgreementReport
     /**
      * @return list<string>
      */
-    private function leftOut(JudgeAgreement $agreement): array
+    private function clipsLeftOut(JudgeAgreement $agreement): array
     {
-        if ($agreement->leftOut === []) {
+        if ($agreement->clipsLeftOut === []) {
             return ['- Clips left out: none'];
         }
 
         $lines = ['- Clips left out:'];
 
-        foreach ($agreement->leftOut as $clip) {
+        foreach ($agreement->clipsLeftOut as $clip) {
             $lines[] = '  - '.$clip['id'].': '.$clip['reason'];
         }
 
@@ -94,11 +106,11 @@ class JudgeAgreementReport
                 $clip['id'],
                 $left->judge_driver,
                 $left->judge_model,
-                $clip['left_verdict'],
+                $clip['left_verdict']->value,
                 implode(', ', $clip['left_tags']),
                 $right->judge_driver,
                 $right->judge_model,
-                $clip['right_verdict'],
+                $clip['right_verdict']->value,
                 implode(', ', $clip['right_tags']),
                 $clip['human_verdict'],
                 implode(', ', $clip['human_tags']),
@@ -106,101 +118,5 @@ class JudgeAgreementReport
         }
 
         return $lines;
-    }
-
-    private function replace(string $existing, string $section): string
-    {
-        $start = $this->headingOffset($existing);
-
-        if ($start === null) {
-            if ($existing === '') {
-                return $section;
-            }
-
-            $separator = match (true) {
-                str_ends_with($existing, "\n\n") => '',
-                str_ends_with($existing, "\n") => "\n",
-                default => "\n\n",
-            };
-
-            return $existing.$separator.$section;
-        }
-
-        $next = $this->nextHeadingOffset($existing, $start);
-        $prefix = substr($existing, 0, $start);
-
-        if ($next === null) {
-            return $prefix.$section;
-        }
-
-        $inserted = str_ends_with($section, "\n\n") ? $section : rtrim($section, "\n")."\n\n";
-
-        return $prefix.$inserted.substr($existing, $next);
-    }
-
-    private function headingOffset(string $existing): ?int
-    {
-        return $this->findLine($existing, 0, fn (string $line): bool => $line === self::HEADING);
-    }
-
-    private function nextHeadingOffset(string $existing, int $start): ?int
-    {
-        $lineEnd = strpos($existing, "\n", $start);
-        $from = $lineEnd === false ? strlen($existing) : $lineEnd + 1;
-
-        return $this->findLine($existing, $from, fn (string $line): bool => str_starts_with($line, '## '));
-    }
-
-    /**
-     * @param  Closure(string): bool  $matches
-     */
-    private function findLine(string $existing, int $from, Closure $matches): ?int
-    {
-        $offset = 0;
-        $fence = null;
-
-        while ($offset <= strlen($existing)) {
-            $newline = strpos($existing, "\n", $offset);
-            $end = $newline === false ? strlen($existing) : $newline;
-            $line = rtrim(substr($existing, $offset, $end - $offset), "\r");
-
-            if ($fence === null) {
-                $opened = $this->openingFence($line);
-
-                if ($opened !== null) {
-                    $fence = $opened;
-                } elseif ($offset >= $from && $matches($line)) {
-                    return $offset;
-                }
-            } elseif ($this->closesFence($line, $fence)) {
-                $fence = null;
-            }
-
-            if ($newline === false) {
-                break;
-            }
-
-            $offset = $newline + 1;
-        }
-
-        return null;
-    }
-
-    private function openingFence(string $line): ?string
-    {
-        if (preg_match('/^(```+|~~~+)/', $line, $matches) !== 1) {
-            return null;
-        }
-
-        return $matches[1];
-    }
-
-    private function closesFence(string $line, string $marker): bool
-    {
-        if (preg_match('/^(```+|~~~+)\s*$/', $line, $matches) !== 1) {
-            return false;
-        }
-
-        return $matches[1][0] === $marker[0] && strlen($matches[1]) >= strlen($marker);
     }
 }
