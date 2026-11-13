@@ -18,8 +18,11 @@ class CreativeConfigTest extends TestCase
         'AGENT_MODEL',
         'JUDGE_PROVIDER',
         'IMAGE_PROVIDER',
+        'IMAGE_MODEL',
+        'IMAGE_REQUESTS_PER_MINUTE',
         'VIDEO_PROVIDER',
         'AUDIO_PROVIDER',
+        'AUDIO_REQUESTS_PER_MINUTE',
     ];
 
     protected function tearDown(): void
@@ -48,8 +51,11 @@ class CreativeConfigTest extends TestCase
         $this->assertSame(6, $config['judge']['video_fps']);
         $this->assertSame(48, $config['judge']['max_frames']);
         $this->assertSame('replay', $config['image']);
+        $this->assertSame('@cf/black-forest-labs/flux-1-schnell', $config['image_model']);
+        $this->assertSame(10, $config['image_requests_per_minute']);
         $this->assertSame('replay', $config['video']);
         $this->assertSame('replay', $config['audio']);
+        $this->assertSame(10, $config['audio_requests_per_minute']);
     }
 
     public function test_creative_config_selects_drivers_from_env(): void
@@ -57,18 +63,24 @@ class CreativeConfigTest extends TestCase
         $this->setEnv([
             'AGENT_PROVIDER' => 'gemini',
             'JUDGE_PROVIDER' => 'gemini',
-            'IMAGE_PROVIDER' => 'flux',
+            'IMAGE_PROVIDER' => 'cloudflare',
+            'IMAGE_MODEL' => '@cf/black-forest-labs/flux-2-dev',
+            'IMAGE_REQUESTS_PER_MINUTE' => '4',
             'VIDEO_PROVIDER' => 'veo',
             'AUDIO_PROVIDER' => 'elevenlabs',
+            'AUDIO_REQUESTS_PER_MINUTE' => '2',
         ]);
 
         $config = $this->loadCreativeConfig();
 
         $this->assertSame('gemini', $config['agent']['provider']);
         $this->assertSame('gemini', $config['judge']['provider']);
-        $this->assertSame('flux', $config['image']);
+        $this->assertSame('cloudflare', $config['image']);
+        $this->assertSame('@cf/black-forest-labs/flux-2-dev', $config['image_model']);
+        $this->assertSame(4, $config['image_requests_per_minute']);
         $this->assertSame('veo', $config['video']);
         $this->assertSame('elevenlabs', $config['audio']);
+        $this->assertSame(2, $config['audio_requests_per_minute']);
     }
 
     public function test_container_resolves_image_video_and_judge_providers(): void

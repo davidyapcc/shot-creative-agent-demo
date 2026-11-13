@@ -48,4 +48,10 @@ return [
         'account_id' => env('CLOUDFLARE_ACCOUNT_ID'),
     ],
 
+    'elevenlabs' => [
+        'key' => env('ELEVENLABS_API_KEY'),
+        'voice_id' => env('ELEVENLABS_VOICE_ID', '21m00Tcm4TlvDq8ikWAM'),
+        'tts_model' => env('ELEVENLABS_TTS_MODEL', 'eleven_v4_turbo'),
+    ],
+
 ];

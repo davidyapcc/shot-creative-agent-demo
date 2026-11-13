@@ -48,6 +48,15 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      IMAGE_PROVIDER: ${IMAGE_PROVIDER:-replay}
+      IMAGE_MODEL: ${IMAGE_MODEL:-@cf/black-forest-labs/flux-1-schnell}
+      IMAGE_REQUESTS_PER_MINUTE: ${IMAGE_REQUESTS_PER_MINUTE:-10}
+      VIDEO_PROVIDER: ${VIDEO_PROVIDER:-replay}
+      AUDIO_PROVIDER: ${AUDIO_PROVIDER:-replay}
+      AUDIO_REQUESTS_PER_MINUTE: ${AUDIO_REQUESTS_PER_MINUTE:-10}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      ELEVENLABS_VOICE_ID: ${ELEVENLABS_VOICE_ID:-21m00Tcm4TlvDq8ikWAM}
+      ELEVENLABS_TTS_MODEL: ${ELEVENLABS_TTS_MODEL:-eleven_v4_turbo}
     volumes:
       - .:/var/www/html
       # Container-local modules. npm install must not write Linux binaries over the host folder.
@@ -110,6 +119,15 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      IMAGE_PROVIDER: ${IMAGE_PROVIDER:-replay}
+      IMAGE_MODEL: ${IMAGE_MODEL:-@cf/black-forest-labs/flux-1-schnell}
+      IMAGE_REQUESTS_PER_MINUTE: ${IMAGE_REQUESTS_PER_MINUTE:-10}
+      VIDEO_PROVIDER: ${VIDEO_PROVIDER:-replay}
+      AUDIO_PROVIDER: ${AUDIO_PROVIDER:-replay}
+      AUDIO_REQUESTS_PER_MINUTE: ${AUDIO_REQUESTS_PER_MINUTE:-10}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      ELEVENLABS_VOICE_ID: ${ELEVENLABS_VOICE_ID:-21m00Tcm4TlvDq8ikWAM}
+      ELEVENLABS_TTS_MODEL: ${ELEVENLABS_TTS_MODEL:-eleven_v4_turbo}
     volumes:
       - .:/var/www/html
     depends_on:
