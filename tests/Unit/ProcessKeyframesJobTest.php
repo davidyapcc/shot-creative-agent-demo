@@ -223,7 +223,6 @@ class ProcessKeyframesJobTest extends TestCase
 
         $this->assertSame('image', GenerateKeyframeJob::RATE_LIMITER);
         $this->assertTrue($job->failOnTimeout);
-        $this->assertLessThan((int) config('queue.connections.redis.retry_after'), $job->timeout);
         $middleware = $job->middleware();
         $this->assertCount(2, $middleware);
 

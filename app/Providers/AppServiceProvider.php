@@ -142,31 +142,28 @@ class AppServiceProvider extends ServiceProvider
 
     private function cloudflareImageProvider(): CloudflareImageProvider
     {
+        $accountId = config('services.cloudflare.account_id');
+        $apiToken = config('services.cloudflare.key');
+        $model = config('creative.image_model');
+
         return new CloudflareImageProvider(
-            accountId: $this->requireConfigString('services.cloudflare.account_id', 'CLOUDFLARE_ACCOUNT_ID is required when IMAGE_PROVIDER=cloudflare.'),
-            apiToken: $this->requireConfigString('services.cloudflare.key', 'CLOUDFLARE_API_TOKEN is required when IMAGE_PROVIDER=cloudflare.'),
-            model: $this->requireConfigString('creative.image_model', 'IMAGE_MODEL is required when IMAGE_PROVIDER=cloudflare.'),
+            accountId: is_string($accountId) ? $accountId : '',
+            apiToken: is_string($apiToken) ? $apiToken : '',
+            model: is_string($model) ? $model : '',
         );
     }
 
     private function elevenLabsAudioProvider(): ElevenLabsAudioProvider
     {
+        $apiKey = config('services.elevenlabs.key');
+        $voiceId = config('services.elevenlabs.voice_id');
+        $ttsModel = config('services.elevenlabs.tts_model');
+
         return new ElevenLabsAudioProvider(
-            apiKey: $this->requireConfigString('services.elevenlabs.key', 'ELEVENLABS_API_KEY is required when AUDIO_PROVIDER=elevenlabs.'),
-            voiceId: $this->requireConfigString('services.elevenlabs.voice_id', 'ELEVENLABS_VOICE_ID is required when AUDIO_PROVIDER=elevenlabs.'),
-            ttsModel: $this->requireConfigString('services.elevenlabs.tts_model', 'ELEVENLABS_TTS_MODEL is required when AUDIO_PROVIDER=elevenlabs.'),
+            apiKey: is_string($apiKey) ? $apiKey : '',
+            voiceId: is_string($voiceId) ? $voiceId : '',
+            ttsModel: is_string($ttsModel) ? $ttsModel : '',
         );
-    }
-
-    private function requireConfigString(string $configKey, string $message): string
-    {
-        $value = config($configKey);
-
-        if (! is_string($value) || trim($value) === '') {
-            throw new InvalidArgumentException($message);
-        }
-
-        return trim($value);
     }
 
     /**

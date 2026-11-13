@@ -7,6 +7,7 @@ namespace App\Services\Providers;
 use App\Contracts\AudioProviderInterface;
 use App\DTOs\AudioResult;
 use App\Exceptions\ProviderRateLimitedException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use InvalidArgumentException;
 use RuntimeException;
@@ -80,11 +81,28 @@ class ElevenLabsAudioProvider implements AudioProviderInterface
 
         $body = $response->body();
 
-        if ($body === '') {
-            throw new RuntimeException("{$label} returned an empty audio payload.");
+        if (! $this->isBinaryAudio($response, $body)) {
+            throw new RuntimeException("{$label} returned an invalid or empty audio payload.");
         }
 
         return $body;
+    }
+
+    private function isBinaryAudio(Response $response, string $body): bool
+    {
+        $trimmed = ltrim($body);
+
+        if ($trimmed === '' || str_starts_with($trimmed, '{') || str_starts_with($trimmed, '[') || str_starts_with($trimmed, '<')) {
+            return false;
+        }
+
+        $contentType = strtolower($response->header('Content-Type'));
+
+        if (str_starts_with($contentType, 'application/json') || str_starts_with($contentType, 'text/')) {
+            return false;
+        }
+
+        return true;
     }
 
     private function ambientPrompt(string $prompt, ?string $styleAnchor): string

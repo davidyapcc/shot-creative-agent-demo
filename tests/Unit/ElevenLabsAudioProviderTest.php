@@ -191,22 +191,27 @@ class ElevenLabsAudioProviderTest extends TestCase
         $this->assertCount(1, Http::recorded());
     }
 
-    public function test_empty_tts_body_never_calls_sound_effects(): void
+    public function test_empty_or_non_audio_tts_body_never_calls_sound_effects(): void
     {
         Http::preventStrayRequests();
         Http::fake([
-            'api.elevenlabs.io/v1/text-to-speech/*' => Http::response('', 200),
+            'api.elevenlabs.io/v1/text-to-speech/*' => Http::sequence()
+                ->push('', 200)
+                ->push(['detail' => 'unexpected'], 200)
+                ->push('<html>error</html>', 200, ['Content-Type' => 'text/html']),
             'api.elevenlabs.io/v1/sound-generation' => Http::response('SFX', 200),
         ]);
 
-        try {
-            $this->provider()->generate('15s product teaser');
-            $this->fail('Empty TTS body should throw RuntimeException.');
-        } catch (RuntimeException $exception) {
-            $this->assertSame('ElevenLabs TTS returned an empty audio payload.', $exception->getMessage());
-        }
+        foreach (['empty', 'json', 'html'] as $index => $case) {
+            try {
+                $this->provider()->generate('15s product teaser');
+                $this->fail("Expected RuntimeException for {$case} TTS body.");
+            } catch (RuntimeException $exception) {
+                $this->assertSame('ElevenLabs TTS returned an invalid or empty audio payload.', $exception->getMessage(), $case);
+            }
 
-        $this->assertCount(1, Http::recorded());
+            $this->assertCount($index + 1, Http::recorded(), $case);
+        }
     }
 
     public function test_sound_effects_rate_limit_and_http_error_handling(): void
@@ -217,7 +222,8 @@ class ElevenLabsAudioProviderTest extends TestCase
             'api.elevenlabs.io/v1/sound-generation' => Http::sequence()
                 ->push(['detail' => self::API_KEY], 429)
                 ->push(self::API_KEY, 502)
-                ->push('', 200),
+                ->push('', 200)
+                ->push(['detail' => 'unexpected'], 200),
         ]);
 
         try {
@@ -236,11 +242,13 @@ class ElevenLabsAudioProviderTest extends TestCase
             $this->assertStringNotContainsString(self::API_KEY, $exception->getMessage());
         }
 
-        try {
-            $this->provider()->generate('15s product teaser');
-            $this->fail('An empty Sound Effects body should throw RuntimeException.');
-        } catch (RuntimeException $exception) {
-            $this->assertSame('ElevenLabs sound effects returned an empty audio payload.', $exception->getMessage());
+        foreach (['empty', 'json'] as $case) {
+            try {
+                $this->provider()->generate('15s product teaser');
+                $this->fail("Expected RuntimeException for {$case} Sound Effects body.");
+            } catch (RuntimeException $exception) {
+                $this->assertSame('ElevenLabs sound effects returned an invalid or empty audio payload.', $exception->getMessage(), $case);
+            }
         }
     }
 

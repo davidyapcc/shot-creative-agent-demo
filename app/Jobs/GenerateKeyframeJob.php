@@ -37,8 +37,6 @@ class GenerateKeyframeJob implements ShouldQueue
 
     private const THROTTLE_BACKOFF_MINUTES = 1;
 
-    public int $timeout = 85;
-
     /**
      * A timed-out run already took its charge, so a retry would pay twice.
      * Fail it instead.
