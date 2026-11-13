@@ -14,6 +14,7 @@ use App\Jobs\MuxFinalVideoJob;
 use App\Models\Brief;
 use App\Models\Shot;
 use App\Services\Budget;
+use App\Services\RateLimitHitCounter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Queue\Middleware\RateLimited;
 use Illuminate\Queue\Middleware\ThrottlesExceptions;
@@ -237,12 +238,17 @@ class GenerateAudioJobTest extends TestCase
             $brief->refresh();
             $this->assertNull($brief->audio_path);
             $this->assertArrayNotHasKey('sound_effect_path', $brief->metadata ?? []);
+            $this->assertSame(0, $brief->budget_used);
+            $this->assertSame([], $brief->metadata['budget_ledger'] ?? []);
+            $this->assertSame(1, app(RateLimitHitCounter::class)->count('audio'));
         }
 
         (new GenerateAudioJob($brief->id))->handle($provider, app(Budget::class));
 
         $this->assertSame(2, $provider->calls);
-        $this->assertSame(BriefState::Muxing, $brief->refresh()->state);
+        $this->assertSame(1, $brief->refresh()->budget_used);
+        $this->assertSame(1, app(RateLimitHitCounter::class)->count('audio'));
+        $this->assertSame(BriefState::Muxing, $brief->state);
         Queue::assertPushed(MuxFinalVideoJob::class, 1);
     }
 

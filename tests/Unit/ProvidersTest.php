@@ -38,6 +38,31 @@ class ProvidersTest extends TestCase
         $this->assertStringStartsWith("\x89PNG\r\n\x1a\n", $content);
     }
 
+    public function test_replay_image_provider_loads_fixture_file_when_present_and_falls_back_when_absent_or_empty(): void
+    {
+        $fixturePath = tempnam(sys_get_temp_dir(), 'replay_img_');
+        $missingPath = sys_get_temp_dir().'/nonexistent_replay_img_'.uniqid('', true).'.png';
+        $fixtureBytes = "\x89PNG\r\n\x1a\n".'recorded-keyframe-bytes';
+
+        try {
+            file_put_contents($fixturePath, $fixtureBytes);
+            $provider = new ReplayImageProvider($fixturePath);
+            $this->assertSame($fixtureBytes, $provider->generateImage('A neon lit rainy street'));
+
+            file_put_contents($fixturePath, '');
+            $fallbackFromEmpty = (new ReplayImageProvider($fixturePath))->generateImage('A neon lit rainy street');
+            $this->assertStringStartsWith("\x89PNG\r\n\x1a\n", $fallbackFromEmpty);
+            $this->assertNotSame($fixtureBytes, $fallbackFromEmpty);
+
+            $fallbackFromMissing = (new ReplayImageProvider($missingPath))->generateImage('A neon lit rainy street');
+            $this->assertSame($fallbackFromEmpty, $fallbackFromMissing);
+        } finally {
+            if (is_file($fixturePath)) {
+                unlink($fixturePath);
+            }
+        }
+    }
+
     public function test_replay_video_provider_submits_and_polls(): void
     {
         $provider = new ReplayVideoProvider(pendingPolls: 1);
@@ -74,6 +99,39 @@ class ProvidersTest extends TestCase
         $this->assertStringStartsWith('RIFF', $audio->voiceover);
         $this->assertStringStartsWith('RIFF', $audio->soundEffect);
         $this->assertNotSame($audio->voiceover, $audio->soundEffect);
+    }
+
+    public function test_replay_audio_provider_loads_fixture_files_when_present_and_falls_back_when_absent_or_empty(): void
+    {
+        $voiceoverPath = tempnam(sys_get_temp_dir(), 'replay_vo_');
+        $sfxPath = tempnam(sys_get_temp_dir(), 'replay_sfx_');
+        $missingPath = sys_get_temp_dir().'/nonexistent_replay_audio_'.uniqid('', true).'.wav';
+
+        try {
+            file_put_contents($voiceoverPath, 'RECORDED_VOICEOVER');
+            file_put_contents($sfxPath, 'RECORDED_SFX');
+
+            $recorded = (new ReplayAudioProvider($voiceoverPath, $sfxPath))->generate('prompt');
+            $this->assertSame('RECORDED_VOICEOVER', $recorded->voiceover);
+            $this->assertSame('RECORDED_SFX', $recorded->soundEffect);
+
+            file_put_contents($voiceoverPath, '');
+            file_put_contents($sfxPath, '');
+
+            $emptyFallback = (new ReplayAudioProvider($voiceoverPath, $sfxPath))->generate('prompt');
+            $missingFallback = (new ReplayAudioProvider($missingPath, $missingPath))->generate('prompt');
+
+            $this->assertStringStartsWith('RIFF', $emptyFallback->voiceover);
+            $this->assertStringStartsWith('RIFF', $emptyFallback->soundEffect);
+            $this->assertSame($emptyFallback->voiceover, $missingFallback->voiceover);
+            $this->assertSame($emptyFallback->soundEffect, $missingFallback->soundEffect);
+        } finally {
+            foreach ([$voiceoverPath, $sfxPath] as $path) {
+                if (is_file($path)) {
+                    unlink($path);
+                }
+            }
+        }
     }
 
     public function test_replay_judge_returns_passing_rubric_shape(): void

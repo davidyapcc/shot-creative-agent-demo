@@ -9,6 +9,7 @@ use App\Enums\BriefState;
 use App\Exceptions\ProviderRateLimitedException;
 use App\Models\Brief;
 use App\Services\Budget;
+use App\Services\RateLimitHitCounter;
 use App\Traits\FailsBriefOnJobFailure;
 use DateTimeInterface;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -65,8 +66,13 @@ class GenerateAudioJob implements ShouldQueue
         return now()->addHours(self::RETRY_WINDOW_HOURS);
     }
 
-    public function handle(AudioProviderInterface $audioProvider, Budget $budget): void
-    {
+    public function handle(
+        AudioProviderInterface $audioProvider,
+        Budget $budget,
+        ?RateLimitHitCounter $rateLimits = null,
+    ): void {
+        $rateLimits ??= new RateLimitHitCounter;
+
         $brief = Brief::findOrFail($this->briefId);
 
         if ($brief->isBudgetExhausted()) {
@@ -96,6 +102,7 @@ class GenerateAudioJob implements ShouldQueue
             // A refused request spent no quota, so give the claim and the charge back.
             $budget->refund($brief, 'audio', 'generate');
             $this->releaseClaim($brief->id);
+            $rateLimits->increment('audio');
 
             throw $exception;
         }

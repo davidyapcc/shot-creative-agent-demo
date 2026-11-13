@@ -11,12 +11,15 @@ use App\Contracts\JudgeInterface;
 use App\Contracts\VideoProviderInterface;
 use App\Events\BriefStateChanged;
 use App\Jobs\GenerateAudioJob;
+use App\Jobs\GenerateKeyframeJob;
 use App\Jobs\JudgeKeyframeJob;
 use App\Jobs\PlanBriefJob;
 use App\Listeners\BroadcastFinishedBriefTelemetry;
 use App\Services\Agent\MockAgent;
 use App\Services\Agent\PrismAgent;
 use App\Services\JudgeFactory;
+use App\Services\Providers\CloudflareImageProvider;
+use App\Services\Providers\ElevenLabsAudioProvider;
 use App\Services\Providers\FfmpegMotionVideoProvider;
 use App\Services\Providers\ReplayAudioProvider;
 use App\Services\Providers\ReplayImageProvider;
@@ -51,6 +54,7 @@ class AppServiceProvider extends ServiceProvider
 
             return match ($provider) {
                 'replay' => new ReplayImageProvider,
+                'cloudflare' => $this->cloudflareImageProvider(),
                 default => throw new InvalidArgumentException("Unsupported image provider [{$provider}]."),
             };
         });
@@ -72,6 +76,7 @@ class AppServiceProvider extends ServiceProvider
 
             return match ($provider) {
                 'replay' => new ReplayAudioProvider,
+                'elevenlabs' => $this->elevenLabsAudioProvider(),
                 default => throw new InvalidArgumentException("Unsupported audio provider [{$provider}]."),
             };
         });
@@ -135,6 +140,32 @@ class AppServiceProvider extends ServiceProvider
         return trim($key);
     }
 
+    private function cloudflareImageProvider(): CloudflareImageProvider
+    {
+        $accountId = config('services.cloudflare.account_id');
+        $apiToken = config('services.cloudflare.key');
+        $model = config('creative.image_model');
+
+        return new CloudflareImageProvider(
+            accountId: is_string($accountId) ? $accountId : '',
+            apiToken: is_string($apiToken) ? $apiToken : '',
+            model: is_string($model) ? $model : '',
+        );
+    }
+
+    private function elevenLabsAudioProvider(): ElevenLabsAudioProvider
+    {
+        $apiKey = config('services.elevenlabs.key');
+        $voiceId = config('services.elevenlabs.voice_id');
+        $ttsModel = config('services.elevenlabs.tts_model');
+
+        return new ElevenLabsAudioProvider(
+            apiKey: is_string($apiKey) ? $apiKey : '',
+            voiceId: is_string($voiceId) ? $voiceId : '',
+            ttsModel: is_string($ttsModel) ? $ttsModel : '',
+        );
+    }
+
     /**
      * Bootstrap any application services.
      */
@@ -144,6 +175,10 @@ class AppServiceProvider extends ServiceProvider
 
         RateLimiter::for(PlanBriefJob::RATE_LIMITER, function (): Limit {
             return Limit::perMinute((int) config('creative.agent.requests_per_minute'));
+        });
+
+        RateLimiter::for(GenerateKeyframeJob::RATE_LIMITER, function (): Limit {
+            return Limit::perMinute((int) config('creative.image_requests_per_minute'));
         });
 
         RateLimiter::for(GenerateAudioJob::RATE_LIMITER, function (): Limit {

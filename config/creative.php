@@ -24,6 +24,8 @@ return [
         'requests_per_minute' => (int) env('JUDGE_REQUESTS_PER_MINUTE', 10),
     ],
     'image' => env('IMAGE_PROVIDER', 'replay'),
+    'image_model' => env('IMAGE_MODEL', '@cf/black-forest-labs/flux-1-schnell'),
+    'image_requests_per_minute' => (int) env('IMAGE_REQUESTS_PER_MINUTE', 10),
     'video' => env('VIDEO_PROVIDER', 'replay'),
     'audio' => env('AUDIO_PROVIDER', 'replay'),
     'audio_requests_per_minute' => (int) env('AUDIO_REQUESTS_PER_MINUTE', 10),

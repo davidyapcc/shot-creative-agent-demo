@@ -46,8 +46,21 @@ services:
       AGENT_REQUESTS_PER_MINUTE: ${AGENT_REQUESTS_PER_MINUTE:-10}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Cloudflare Workers AI free tier: 10,000 Neurons/day, resets 00:00 UTC.
+      # Used by AGENT_PROVIDER=cloudflare and IMAGE_PROVIDER=cloudflare.
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      IMAGE_PROVIDER: ${IMAGE_PROVIDER:-replay}
+      IMAGE_MODEL: ${IMAGE_MODEL:-@cf/black-forest-labs/flux-1-schnell}
+      IMAGE_REQUESTS_PER_MINUTE: ${IMAGE_REQUESTS_PER_MINUTE:-10}
+      VIDEO_PROVIDER: ${VIDEO_PROVIDER:-replay}
+      AUDIO_PROVIDER: ${AUDIO_PROVIDER:-replay}
+      AUDIO_REQUESTS_PER_MINUTE: ${AUDIO_REQUESTS_PER_MINUTE:-10}
+      # ElevenLabs free tier: only 8 sound-effect generations/month.
+      # Make live calls from a home connection (no VPN) or the free tier gets disabled.
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      ELEVENLABS_VOICE_ID: ${ELEVENLABS_VOICE_ID:-21m00Tcm4TlvDq8ikWAM}
+      ELEVENLABS_TTS_MODEL: ${ELEVENLABS_TTS_MODEL:-eleven_v4_turbo}
     volumes:
       - .:/var/www/html
       # Container-local modules. npm install must not write Linux binaries over the host folder.
@@ -108,8 +121,21 @@ services:
       AGENT_REQUESTS_PER_MINUTE: ${AGENT_REQUESTS_PER_MINUTE:-10}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Cloudflare Workers AI free tier: 10,000 Neurons/day, resets 00:00 UTC.
+      # Used by AGENT_PROVIDER=cloudflare and IMAGE_PROVIDER=cloudflare.
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
       CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      IMAGE_PROVIDER: ${IMAGE_PROVIDER:-replay}
+      IMAGE_MODEL: ${IMAGE_MODEL:-@cf/black-forest-labs/flux-1-schnell}
+      IMAGE_REQUESTS_PER_MINUTE: ${IMAGE_REQUESTS_PER_MINUTE:-10}
+      VIDEO_PROVIDER: ${VIDEO_PROVIDER:-replay}
+      AUDIO_PROVIDER: ${AUDIO_PROVIDER:-replay}
+      AUDIO_REQUESTS_PER_MINUTE: ${AUDIO_REQUESTS_PER_MINUTE:-10}
+      # ElevenLabs free tier: only 8 sound-effect generations/month.
+      # Make live calls from a home connection (no VPN) or the free tier gets disabled.
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      ELEVENLABS_VOICE_ID: ${ELEVENLABS_VOICE_ID:-21m00Tcm4TlvDq8ikWAM}
+      ELEVENLABS_TTS_MODEL: ${ELEVENLABS_TTS_MODEL:-eleven_v4_turbo}
     volumes:
       - .:/var/www/html
     depends_on:
