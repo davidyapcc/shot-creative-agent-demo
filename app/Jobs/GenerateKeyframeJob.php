@@ -98,6 +98,11 @@ class GenerateKeyframeJob implements ShouldQueue
             $rateLimits->increment('image');
 
             throw $exception;
+        } catch (Throwable $exception) {
+            // Any other failure keeps its charge, so it counts as a generation (shots.attempts counts every one).
+            $shot->recordStepAttempt('image');
+
+            throw $exception;
         }
 
         $shot->recordStepAttempt('image');
