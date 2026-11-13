@@ -13,6 +13,8 @@ RUN apk add --no-cache \
     npm \
     $PHPIZE_DEPS \
     && docker-php-ext-install pdo pdo_pgsql pgsql pcntl bcmath zip \
+    && pecl install pcov \
+    && docker-php-ext-enable pcov \
     && rm -rf /tmp/pear
 
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
