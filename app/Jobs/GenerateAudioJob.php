@@ -8,8 +8,9 @@ use App\Contracts\AudioProviderInterface;
 use App\Enums\BriefState;
 use App\Exceptions\ProviderRateLimitedException;
 use App\Models\Brief;
-use App\Services\Budget;
-use App\Services\RateLimitHitCounter;
+use App\Services\PaidCall;
+use App\Services\PaidCallClaim;
+use App\Services\PaidCallOutcome;
 use App\Traits\FailsBriefOnJobFailure;
 use DateTimeInterface;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -17,7 +18,6 @@ use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\RateLimited;
 use Illuminate\Queue\Middleware\ThrottlesExceptions;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
 
@@ -66,13 +66,8 @@ class GenerateAudioJob implements ShouldQueue
         return now()->addHours(self::RETRY_WINDOW_HOURS);
     }
 
-    public function handle(
-        AudioProviderInterface $audioProvider,
-        Budget $budget,
-        ?RateLimitHitCounter $rateLimits = null,
-    ): void {
-        $rateLimits ??= new RateLimitHitCounter;
-
+    public function handle(AudioProviderInterface $audioProvider, PaidCall $paidCall): void
+    {
         $brief = Brief::findOrFail($this->briefId);
 
         if ($brief->isBudgetExhausted()) {
@@ -83,70 +78,58 @@ class GenerateAudioJob implements ShouldQueue
             return;
         }
 
-        if (! $budget->chargeOrDegrade($brief, 'audio', 'generate')) {
-            return;
-        }
-
         $voiceoverPath = "audio/brief_{$brief->id}_voiceover.wav";
         $soundEffectPath = "audio/brief_{$brief->id}_sfx.wav";
 
-        if (! $this->claim($brief->id, $voiceoverPath, $soundEffectPath)) {
-            $budget->refund($brief, 'audio', 'generate');
+        $result = $paidCall->forBrief(
+            $brief,
+            BriefState::Audio,
+            'audio',
+            'generate',
+            call: function () use ($audioProvider, $brief, $voiceoverPath, $soundEffectPath): void {
+                $audio = $audioProvider->generate($brief->prompt, $brief->style_anchor);
 
-            return;
+                Storage::disk('s3')->put($voiceoverPath, $audio->voiceover);
+                Storage::disk('s3')->put($soundEffectPath, $audio->soundEffect);
+            },
+            apply: fn (Brief $locked) => $locked->transitionTo(BriefState::Muxing),
+            claim: $this->claim($voiceoverPath, $soundEffectPath),
+        );
+
+        if ($result->outcome === PaidCallOutcome::Late) {
+            // The claim is released, so nothing points at these files any more.
+            Storage::disk('s3')->delete([$voiceoverPath, $soundEffectPath]);
         }
 
-        try {
-            $audio = $audioProvider->generate($brief->prompt, $brief->style_anchor);
-        } catch (ProviderRateLimitedException $exception) {
-            // A refused request spent no quota, so give the claim and the charge back.
-            $budget->refund($brief, 'audio', 'generate');
-            $this->releaseClaim($brief->id);
-            $rateLimits->increment('audio');
-
-            throw $exception;
+        if ($result->wasApplied()) {
+            MuxFinalVideoJob::dispatch($brief->id);
         }
-
-        Storage::disk('s3')->put($voiceoverPath, $audio->voiceover);
-        Storage::disk('s3')->put($soundEffectPath, $audio->soundEffect);
-
-        $brief->refresh();
-        $brief->transitionTo(BriefState::Muxing);
-        MuxFinalVideoJob::dispatch($brief->id);
     }
 
     /**
-     * Reserve the audio paths under a row lock so only one run calls the provider.
+     * The claim is the reserved audio paths: only the run that set them calls the provider.
      */
-    private function claim(int $briefId, string $voiceoverPath, string $soundEffectPath): bool
+    private function claim(string $voiceoverPath, string $soundEffectPath): PaidCallClaim
     {
-        return DB::transaction(function () use ($briefId, $voiceoverPath, $soundEffectPath): bool {
-            $locked = Brief::query()->whereKey($briefId)->lockForUpdate()->first();
+        return new PaidCallClaim(
+            take: function (Brief $locked) use ($voiceoverPath, $soundEffectPath): bool {
+                if ($locked->audio_path !== null) {
+                    return false;
+                }
 
-            if ($locked === null || $locked->audio_path !== null || $locked->state !== BriefState::Audio) {
-                return false;
-            }
+                $locked->update([
+                    'audio_path' => $voiceoverPath,
+                    'metadata' => [...$locked->metadata ?? [], 'sound_effect_path' => $soundEffectPath],
+                ]);
 
-            $locked->update([
-                'audio_path' => $voiceoverPath,
-                'metadata' => array_merge($locked->metadata ?? [], [
-                    'sound_effect_path' => $soundEffectPath,
-                ]),
-            ]);
-
-            return true;
-        });
-    }
-
-    private function releaseClaim(int $briefId): void
-    {
-        DB::transaction(function () use ($briefId): void {
-            $locked = Brief::query()->whereKey($briefId)->lockForUpdate()->firstOrFail();
-
-            $locked->update([
-                'audio_path' => null,
-                'metadata' => Arr::except($locked->metadata ?? [], ['sound_effect_path']),
-            ]);
-        });
+                return true;
+            },
+            release: function (Brief $locked): void {
+                $locked->update([
+                    'audio_path' => null,
+                    'metadata' => Arr::except($locked->metadata ?? [], ['sound_effect_path']),
+                ]);
+            },
+        );
     }
 }
