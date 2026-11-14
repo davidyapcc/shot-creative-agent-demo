@@ -381,4 +381,104 @@ class PollVideoRenderJobTest extends TestCase
         $this->assertSame(BriefState::Rendering, $brief->refresh()->state);
         Queue::assertNothingPushed();
     }
+
+    public function test_poll_is_metered_in_the_ledger_at_zero_cost_and_spends_no_budget(): void
+    {
+        // Arrange
+        [$brief, $shot] = $this->renderingBriefWithShot();
+        $provider = $this->createMock(VideoProviderInterface::class);
+        $provider->method('poll')->willReturn(VideoRenderResult::pending());
+
+        // Act
+        $this->pollOnce($provider, $shot, $brief);
+        $this->pollOnce($provider, $shot, $brief);
+
+        // Assert
+        $brief->refresh();
+        $this->assertSame(0, $brief->budget_used);
+        $this->assertSame([
+            ['provider' => 'video', 'operation' => 'poll', 'cost' => 0, 'shot_id' => $shot->id],
+            ['provider' => 'video', 'operation' => 'poll', 'cost' => 0, 'shot_id' => $shot->id],
+        ], $brief->metadata['budget_ledger']);
+        $this->assertSame(0.0, $brief->costUnits());
+    }
+
+    public function test_poll_at_the_budget_cap_keeps_polling_without_a_budget_stop(): void
+    {
+        // Arrange
+        config(['creative.budget_cap' => 1]);
+        [$brief, $shot] = $this->renderingBriefWithShot(['budget_used' => 1]);
+        $provider = $this->createMock(VideoProviderInterface::class);
+        $provider->expects($this->once())->method('poll')->willReturn(VideoRenderResult::pending());
+
+        // Act
+        $job = $this->pollOnce($provider, $shot, $brief);
+
+        // Assert
+        $this->assertTrue($job->job->isReleased());
+        $this->assertFalse($brief->refresh()->isBudgetExhausted());
+        $this->assertSame(BriefState::Rendering, $brief->state);
+        $this->assertSame(ShotState::GeneratingVideo, $shot->refresh()->state);
+    }
+
+    public function test_poll_for_a_failed_shot_stops_without_calling_the_provider(): void
+    {
+        // Arrange
+        [$brief, $shot] = $this->renderingBriefWithShot();
+        $shot->update(['state' => ShotState::Failed]);
+        $provider = $this->createMock(VideoProviderInterface::class);
+        $provider->expects($this->never())->method('poll');
+
+        // Act
+        $job = $this->pollOnce($provider, $shot, $brief);
+
+        // Assert
+        $this->assertFalse($job->job->isReleased());
+        $this->assertArrayNotHasKey('budget_ledger', $brief->refresh()->metadata ?? []);
+    }
+
+    public function test_poll_after_the_budget_stop_stops_without_calling_the_provider(): void
+    {
+        // Arrange
+        [$brief, $shot] = $this->renderingBriefWithShot(['metadata' => ['budget_exhausted' => true]]);
+        $provider = $this->createMock(VideoProviderInterface::class);
+        $provider->expects($this->never())->method('poll');
+
+        // Act
+        $job = $this->pollOnce($provider, $shot, $brief);
+
+        // Assert
+        $this->assertFalse($job->job->isReleased());
+    }
+
+    /**
+     * @param  array<string, mixed>  $briefAttributes
+     * @return array{0: Brief, 1: Shot}
+     */
+    private function renderingBriefWithShot(array $briefAttributes = []): array
+    {
+        $brief = Brief::create([
+            'prompt' => '15s product teaser',
+            'state' => BriefState::Rendering,
+            ...$briefAttributes,
+        ]);
+
+        $shot = Shot::create([
+            'brief_id' => $brief->id,
+            'sequence' => 1,
+            'prompt' => 'Shot 1 prompt',
+            'state' => ShotState::GeneratingVideo,
+        ]);
+
+        return [$brief, $shot];
+    }
+
+    private function pollOnce(VideoProviderInterface $provider, Shot $shot, Brief $brief): PollVideoRenderJob
+    {
+        $job = new PollVideoRenderJob($shot->id, 'test-render-id', $brief->id);
+        $job->withFakeQueueInteractions();
+        $job->handle($provider, app(Budget::class));
+
+        return $job;
+    }
 }
