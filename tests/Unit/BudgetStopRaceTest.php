@@ -19,6 +19,7 @@ use App\Jobs\PollVideoRenderJob;
 use App\Models\Brief;
 use App\Models\Shot;
 use App\Services\Budget;
+use App\Services\PaidCall;
 use App\Services\ShotStepRetry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
@@ -56,11 +57,33 @@ class BudgetStopRaceTest extends TestCase
         });
 
         // Act
-        (new GenerateKeyframeJob($shot->id, $brief->id))->handle($images, app(Budget::class));
+        (new GenerateKeyframeJob($shot->id, $brief->id))->handle($images, app(PaidCall::class));
 
         // Assert
         $this->assertSame(ShotState::Failed, $shot->refresh()->state);
         $this->assertSame(BriefState::Muxing, $brief->refresh()->state);
+    }
+
+    public function test_late_keyframe_leaves_no_path_and_counts_no_attempt(): void
+    {
+        // Arrange
+        [$brief, $shot] = $this->briefWithShot(BriefState::Keyframes, ShotState::Pending);
+        $shot->update(['keyframe_path' => null]);
+
+        $images = $this->createMock(ImageProviderInterface::class);
+        $images->method('generateImage')->willReturnCallback(function () use ($shot, $brief): string {
+            $this->stopForBudget($brief, $shot);
+
+            return 'png-bytes';
+        });
+
+        // Act
+        (new GenerateKeyframeJob($shot->id, $brief->id))->handle($images, app(PaidCall::class));
+
+        // Assert
+        $shot->refresh();
+        $this->assertNull($shot->keyframe_path);
+        $this->assertSame(0, $shot->attempts);
     }
 
     public function test_late_render_does_not_throw_or_queue_a_judge_after_the_budget_stop(): void

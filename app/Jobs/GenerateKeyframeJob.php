@@ -9,8 +9,7 @@ use App\Enums\ShotState;
 use App\Events\ShotUpdated;
 use App\Exceptions\ProviderRateLimitedException;
 use App\Models\Shot;
-use App\Services\Budget;
-use App\Services\RateLimitHitCounter;
+use App\Services\PaidCall;
 use App\Traits\FailsBriefOnJobFailure;
 use DateTimeInterface;
 use Illuminate\Bus\Batchable;
@@ -68,57 +67,49 @@ class GenerateKeyframeJob implements ShouldQueue
         return now()->addHours(self::RETRY_WINDOW_HOURS);
     }
 
-    public function handle(
-        ImageProviderInterface $imageProvider,
-        Budget $budget,
-        ?RateLimitHitCounter $rateLimits = null,
-    ): void {
-        $rateLimits ??= new RateLimitHitCounter;
-
+    public function handle(ImageProviderInterface $imageProvider, PaidCall $paidCall): void
+    {
         if ($this->batch()?->cancelled()) {
             return;
         }
 
         $shot = Shot::with('brief')->findOrFail($this->shotId);
 
-        if (! $budget->chargeShotStep($shot, 'image', 'generateImage')) {
-            return;
-        }
+        $result = $paidCall->forShot(
+            $shot,
+            'image',
+            'generateImage',
+            call: fn (): string => $this->generate($shot, $imageProvider),
+            apply: function (Shot $locked, string $keyframePath): void {
+                $locked->recordStepAttempt('image');
+                $locked->update(['keyframe_path' => $keyframePath]);
+                $locked->transitionTo(ShotState::JudgingImage);
+            },
+            // A failure that kept its charge is a generation (shots.attempts counts every one).
+            onFailure: fn (Shot $locked) => $locked->recordStepAttempt('image'),
+        );
 
+        if ($result->wasApplied()) {
+            ShotUpdated::dispatch($shot);
+        }
+    }
+
+    /**
+     * Generate the keyframe and upload it. Returns the stored path.
+     */
+    private function generate(Shot $shot, ImageProviderInterface $imageProvider): string
+    {
         if ($shot->state->canTransitionTo(ShotState::GeneratingImage)) {
             $shot->transitionTo(ShotState::GeneratingImage);
             ShotUpdated::dispatch($shot);
         }
 
-        try {
-            $imageBytes = $imageProvider->generateImage($shot->prompt, $shot->brief?->style_anchor);
-        } catch (ProviderRateLimitedException $exception) {
-            // A refused request spent no quota, so refund the charge without counting an attempt.
-            $budget->refundShotStep($shot, 'image', 'generateImage');
-            $rateLimits->increment('image');
-
-            throw $exception;
-        } catch (Throwable $exception) {
-            // Any other failure keeps its charge, so it counts as a generation (shots.attempts counts every one).
-            $shot->recordStepAttempt('image');
-
-            throw $exception;
-        }
-
-        $shot->recordStepAttempt('image');
+        $imageBytes = $imageProvider->generateImage($shot->prompt, $shot->brief?->style_anchor);
 
         $keyframePath = "keyframes/brief_{$shot->brief_id}_shot_{$shot->id}.png";
 
         Storage::disk('s3')->put($keyframePath, $imageBytes);
 
-        $shot->update([
-            'keyframe_path' => $keyframePath,
-        ]);
-
-        if (! $shot->advanceUnlessStopped(ShotState::JudgingImage)) {
-            return;
-        }
-
-        ShotUpdated::dispatch($shot);
+        return $keyframePath;
     }
 }

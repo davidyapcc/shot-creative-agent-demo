@@ -21,6 +21,7 @@ use App\Models\Brief;
 use App\Models\Shot;
 use App\Services\Agent\MockAgent;
 use App\Services\Budget;
+use App\Services\PaidCall;
 use App\Services\ShotStepRetry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
@@ -225,14 +226,14 @@ class JudgeRetryTest extends TestCase
         ]);
 
         $job = new GenerateKeyframeJob($shot->id, $brief->id);
-        $job->handle(app(ImageProviderInterface::class), app(Budget::class));
+        $job->handle(app(ImageProviderInterface::class), app(PaidCall::class));
 
         $shot->refresh();
         $this->assertSame(1, $shot->attempts);
         $this->assertSame(1, $shot->metadata['step_attempts']['image']);
         $this->assertSame(ShotState::JudgingImage, $shot->state);
 
-        $job->handle(app(ImageProviderInterface::class), app(Budget::class));
+        $job->handle(app(ImageProviderInterface::class), app(PaidCall::class));
 
         $shot->refresh();
         $this->assertSame(2, $shot->attempts);

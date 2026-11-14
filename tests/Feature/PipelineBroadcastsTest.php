@@ -27,6 +27,7 @@ use App\Jobs\ProcessKeyframesJob;
 use App\Models\Brief;
 use App\Models\Shot;
 use App\Services\Budget;
+use App\Services\PaidCall;
 use App\Services\ShotStepRetry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
@@ -74,7 +75,7 @@ class PipelineBroadcastsTest extends TestCase
         ]);
 
         $imageProvider = app(ImageProviderInterface::class);
-        (new GenerateKeyframeJob($shot->id, $brief->id))->handle($imageProvider, app(Budget::class));
+        (new GenerateKeyframeJob($shot->id, $brief->id))->handle($imageProvider, app(PaidCall::class));
 
         Event::assertDispatched(ShotUpdated::class, function (ShotUpdated $event) use ($shot): bool {
             return $event->shot->id === $shot->id
