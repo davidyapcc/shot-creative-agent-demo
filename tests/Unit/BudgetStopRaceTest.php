@@ -11,6 +11,8 @@ use App\DTOs\JudgementResult;
 use App\DTOs\VideoRenderResult;
 use App\Enums\BriefState;
 use App\Enums\ShotState;
+use App\Events\ShotUpdated;
+use App\Events\VideoProgressUpdated;
 use App\Jobs\GenerateKeyframeJob;
 use App\Jobs\JudgeVideoJob;
 use App\Jobs\PollVideoRenderJob;
@@ -20,6 +22,7 @@ use App\Services\Budget;
 use App\Services\ShotStepRetry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -79,6 +82,33 @@ class BudgetStopRaceTest extends TestCase
         $this->assertSame(ShotState::Failed, $shot->refresh()->state);
         $this->assertSame(BriefState::Muxing, $brief->refresh()->state);
         Bus::assertNotDispatched(JudgeVideoJob::class);
+    }
+
+    public function test_late_render_stores_no_clip_path_and_broadcasts_nothing_after_the_budget_stop(): void
+    {
+        // Arrange
+        Event::fake([VideoProgressUpdated::class, ShotUpdated::class]);
+        [$brief, $shot] = $this->briefWithShot(BriefState::Rendering, ShotState::GeneratingVideo);
+        $pathBeforePoll = $shot->video_path;
+        $lateClipPath = "videos/brief_{$brief->id}_shot_{$shot->id}.mp4";
+
+        $videos = $this->createMock(VideoProviderInterface::class);
+        $videos->method('poll')->willReturnCallback(function () use ($shot, $brief): VideoRenderResult {
+            $this->stopForBudget($brief, $shot);
+
+            return VideoRenderResult::completed('mp4-bytes');
+        });
+
+        // Act
+        (new PollVideoRenderJob($shot->id, 'render-1', $brief->id))->handle($videos, app(Budget::class));
+
+        // Assert
+        $shot->refresh();
+        $this->assertSame($pathBeforePoll, $shot->video_path);
+        $this->assertArrayNotHasKey('video_progress', $shot->metadata ?? []);
+        Storage::disk('s3')->assertMissing($lateClipPath);
+        Event::assertNotDispatched(VideoProgressUpdated::class);
+        Event::assertNotDispatched(ShotUpdated::class);
     }
 
     public function test_late_passing_video_verdict_does_not_revive_a_shot_the_budget_stop_failed(): void

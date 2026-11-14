@@ -105,13 +105,16 @@ class PollVideoRenderJob implements ShouldQueue
 
         Storage::disk('s3')->put($videoPath, (string) $result->videoContent);
 
+        // A late result is dropped whole: no clip kept, no path stored.
+        if (! $shot->advanceUnlessStopped(ShotState::JudgingVideo)) {
+            Storage::disk('s3')->delete($videoPath);
+
+            return;
+        }
+
         $this->storeVideoProgress($shot, self::COMPLETED_PROGRESS, [
             'video_path' => $videoPath,
         ]);
-
-        if (! $shot->advanceUnlessStopped(ShotState::JudgingVideo)) {
-            return;
-        }
 
         VideoProgressUpdated::dispatch($this->briefId, $this->shotId, self::COMPLETED_PROGRESS);
         ShotUpdated::dispatch($shot);
