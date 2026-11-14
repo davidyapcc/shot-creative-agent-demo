@@ -16,6 +16,7 @@ use App\Models\Brief;
 use App\Models\Shot;
 use App\Services\Agent\MockAgent;
 use App\Services\Budget;
+use App\Services\PaidCall;
 use App\Services\Providers\ReplayVideoProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
@@ -128,7 +129,7 @@ class BudgetTest extends TestCase
         ]);
 
         $agent = new CountingAgent;
-        (new PlanBriefJob($brief->id))->handle($agent, app(Budget::class));
+        (new PlanBriefJob($brief->id))->handle($agent, app(PaidCall::class));
 
         $this->assertSame(0, $agent->planCalls);
         $brief->refresh();

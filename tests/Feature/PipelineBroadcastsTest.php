@@ -51,7 +51,7 @@ class PipelineBroadcastsTest extends TestCase
         ]);
 
         $agent = app(AgentInterface::class);
-        (new PlanBriefJob($brief->id))->handle($agent, app(Budget::class));
+        (new PlanBriefJob($brief->id))->handle($agent, app(PaidCall::class));
 
         Event::assertDispatched(ShotUpdated::class, 3);
     }

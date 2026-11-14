@@ -94,7 +94,7 @@ class AgentRateLimitTest extends TestCase
         $agent = new RateLimitedPlanningAgent(failPlanTimes: 1);
 
         try {
-            (new PlanBriefJob($brief->id))->handle($agent, app(Budget::class), app(RateLimitHitCounter::class));
+            (new PlanBriefJob($brief->id))->handle($agent, app(PaidCall::class));
             $this->fail('The rate-limit error should escape the job.');
         } catch (ProviderRateLimitedException) {
             $brief->refresh();
@@ -106,7 +106,7 @@ class AgentRateLimitTest extends TestCase
             $this->assertSame(1, app(RateLimitHitCounter::class)->count('agent'));
         }
 
-        (new PlanBriefJob($brief->id))->handle($agent, app(Budget::class), app(RateLimitHitCounter::class));
+        (new PlanBriefJob($brief->id))->handle($agent, app(PaidCall::class));
 
         $brief->refresh();
         $this->assertSame(2, $agent->planCalls);
@@ -143,7 +143,7 @@ class AgentRateLimitTest extends TestCase
             'state' => BriefState::Pending,
         ]);
 
-        (new PlanBriefJob($brief->id))->handle(app(AgentInterface::class), app(Budget::class));
+        (new PlanBriefJob($brief->id))->handle(app(AgentInterface::class), app(PaidCall::class));
 
         $brief->refresh();
         $this->assertSame('Cinematic neon rain.', $brief->style_anchor);
@@ -166,7 +166,7 @@ class AgentRateLimitTest extends TestCase
             'state' => BriefState::Planning,
         ]);
 
-        (new PlanBriefJob($brief->id))->handle(new BriefFailingPlanningAgent($brief), app(Budget::class));
+        (new PlanBriefJob($brief->id))->handle(new BriefFailingPlanningAgent($brief), app(PaidCall::class));
 
         $brief->refresh();
         $this->assertSame(BriefState::Failed, $brief->state);
@@ -188,7 +188,7 @@ class AgentRateLimitTest extends TestCase
         ]);
         $agent = new RateLimitedPlanningAgent;
 
-        (new PlanBriefJob($brief->id))->handle($agent, app(Budget::class));
+        (new PlanBriefJob($brief->id))->handle($agent, app(PaidCall::class));
 
         $brief->refresh();
         $this->assertSame(0, $agent->planCalls);
