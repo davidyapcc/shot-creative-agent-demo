@@ -340,7 +340,7 @@ class AgentRateLimitTest extends TestCase
 
     private function handleRewrite(RewritePromptJob $job, AgentInterface $agent): void
     {
-        $job->handle($agent, app(Budget::class), app(ShotStepRetry::class), app(RateLimitHitCounter::class));
+        $job->handle($agent, app(PaidCall::class), app(ShotStepRetry::class));
     }
 
     private function throttle(object $job): ThrottlesExceptions
