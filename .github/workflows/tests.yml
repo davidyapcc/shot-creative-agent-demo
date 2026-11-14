@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up PHP with pcov
         uses: shivammathur/setup-php@v2
@@ -34,13 +34,16 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm
 
       - name: Install Composer dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Check code style (Pint)
+        run: composer lint
 
       # The welcome page tests render @vite, which needs public/build/manifest.json.
       - name: Build frontend assets
