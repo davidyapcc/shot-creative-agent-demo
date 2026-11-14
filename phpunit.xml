@@ -27,6 +27,11 @@
         <server name="MAIL_MAILER" value="array" force="true"/>
         <server name="QUEUE_CONNECTION" value="sync" force="true"/>
         <server name="SESSION_DRIVER" value="array" force="true"/>
+        <server name="AGENT_PROVIDER" value="mock" force="true"/>
+        <server name="JUDGE_PROVIDER" value="replay" force="true"/>
+        <server name="IMAGE_PROVIDER" value="replay" force="true"/>
+        <server name="VIDEO_PROVIDER" value="replay" force="true"/>
+        <server name="AUDIO_PROVIDER" value="replay" force="true"/>
         <env name="APP_ENV" value="testing" force="true"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file" force="true"/>
         <env name="BCRYPT_ROUNDS" value="4" force="true"/>
@@ -38,6 +43,11 @@
         <env name="MAIL_MAILER" value="array" force="true"/>
         <env name="QUEUE_CONNECTION" value="sync" force="true"/>
         <env name="SESSION_DRIVER" value="array" force="true"/>
+        <env name="AGENT_PROVIDER" value="mock" force="true"/>
+        <env name="JUDGE_PROVIDER" value="replay" force="true"/>
+        <env name="IMAGE_PROVIDER" value="replay" force="true"/>
+        <env name="VIDEO_PROVIDER" value="replay" force="true"/>
+        <env name="AUDIO_PROVIDER" value="replay" force="true"/>
         <env name="PULSE_ENABLED" value="false" force="true"/>
         <env name="TELESCOPE_ENABLED" value="false" force="true"/>
         <env name="NIGHTWATCH_ENABLED" value="false" force="true"/>
