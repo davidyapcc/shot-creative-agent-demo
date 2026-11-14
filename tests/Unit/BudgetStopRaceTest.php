@@ -34,8 +34,9 @@ use Tests\TestCase;
 
 /**
  * A job already mid-call when the budget cap is hit finds its shot failed by
- * DegradedCompletion. It must drop its result quietly: no exception (which
- * would flip the muxing brief to failed) and no overwrite of the failed shot.
+ * DegradedCompletion. It must drop its late result quietly: no exception
+ * (which would flip the muxing brief to failed), no write and no broadcast.
+ * PaidCallTest covers the ordering itself; these check each step is wired to it.
  */
 class BudgetStopRaceTest extends TestCase
 {
@@ -49,27 +50,7 @@ class BudgetStopRaceTest extends TestCase
         Bus::fake();
     }
 
-    public function test_late_keyframe_does_not_revive_a_shot_the_budget_stop_failed(): void
-    {
-        // Arrange
-        [$brief, $shot] = $this->briefWithShot(BriefState::Keyframes, ShotState::Pending);
-
-        $images = $this->createMock(ImageProviderInterface::class);
-        $images->method('generateImage')->willReturnCallback(function () use ($shot, $brief): string {
-            $this->stopForBudget($brief, $shot);
-
-            return 'png-bytes';
-        });
-
-        // Act
-        (new GenerateKeyframeJob($shot->id, $brief->id))->handle($images, app(PaidCall::class));
-
-        // Assert
-        $this->assertSame(ShotState::Failed, $shot->refresh()->state);
-        $this->assertSame(BriefState::Muxing, $brief->refresh()->state);
-    }
-
-    public function test_late_keyframe_leaves_no_path_and_counts_no_attempt(): void
+    public function test_late_keyframe_does_not_revive_the_shot_store_a_path_or_count_an_attempt(): void
     {
         // Arrange
         [$brief, $shot] = $this->briefWithShot(BriefState::Keyframes, ShotState::Pending);
@@ -87,6 +68,8 @@ class BudgetStopRaceTest extends TestCase
 
         // Assert
         $shot->refresh();
+        $this->assertSame(ShotState::Failed, $shot->state);
+        $this->assertSame(BriefState::Muxing, $brief->refresh()->state);
         $this->assertNull($shot->keyframe_path);
         $this->assertSame(0, $shot->attempts);
     }

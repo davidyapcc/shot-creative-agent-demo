@@ -12,16 +12,18 @@ Pint's Laravel preset (`pint.json`) is the standard. Run `composer format` on th
 
 ## Paid-call discipline
 
-Every provider call is metered against the brief budget, and every one except a render poll spends it. Eval runs carry their own budget (`docs/adr/0001-eval-runs-carry-their-own-budget.md`). These rules each come from a bug already fixed once:
+Every provider call is metered against the brief budget, and every one except a render poll spends it. Eval runs carry their own budget (`docs/adr/0001-eval-runs-carry-their-own-budget.md`).
 
-- **Charge first.** Go through `Budget::chargeShotStep` (shot steps) or `Budget::chargeOrDegrade` (brief steps); on `false`, skip the call.
-- **Re-check after the call.** The budget stop can fail a shot while its job is mid-call. Advance with `Shot::advanceUnlessStopped`, which locks the row and drops the late result.
-- **Claim one-shot work before calling.** Reserve it under a row lock (as `GenerateAudioJob::claim` does), so a retry or an overlapping job never pays twice.
+Make every paid call through `App\Services\PaidCall` (`forShot` for a shot step, `forBrief` for a brief step). It owns the order: charge, claim, call, refund on a 429, re-check under a row lock, then apply or drop the late result. Only `PaidCall` calls `Budget` to charge or refund; `PaidCallOwnershipTest` goes red otherwise.
+
+The module cannot enforce these:
+
+- **Write only in `apply`.** Database writes go in the `apply` closure, on the locked row it hands you. Broadcast and dispatch after the call returns, and only when the result `wasApplied()`.
+- **Claim one-shot work.** Pass a `PaidCallClaim` whose `take` and `release` set and clear the step's own marker (as `GenerateAudioJob::claim` does), so a retry or an overlapping job never pays twice.
+- **Count a failed generation.** Pass `onFailure` to record the attempt; `shots.attempts` counts every generation, image and video together.
 - **Polls are metered, never charged.** Only the video submit spends budget. Log each poll at zero cost with `Budget::meterFreeShotCall`; on `false`, stop polling.
 - **Fail early.** Once no shot can pass, fail the brief before the next stage spends anything.
-- `Budget::refund` reverses only the latest ledger entry, and logs a warning otherwise. Shot steps run in parallel, so refund them with `Budget::refundShotStep`, which matches the entry by shot id.
 - `shots.prompt` holds the latest rewrite; rewrites read the planned scene from `metadata['original_prompt']`.
-- `shots.attempts` counts every generation, image and video together.
 
 ## State names
 
