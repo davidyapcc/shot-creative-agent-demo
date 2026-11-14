@@ -24,6 +24,7 @@ use App\Models\Judgement;
 use App\Models\Shot;
 use App\Services\Agent\MockAgent;
 use App\Services\Budget;
+use App\Services\PaidCall;
 use App\Services\RateLimitHitCounter;
 use App\Services\ShotStepRetry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -202,7 +203,7 @@ class AgentRateLimitTest extends TestCase
         $agent = new SteadyRewriteAgent;
         $this->app->instance(AgentInterface::class, $agent);
 
-        (new JudgeKeyframeJob($shot->id, $brief->id))->handle(new CountingFailJudge, app(ShotStepRetry::class), app(Budget::class));
+        (new JudgeKeyframeJob($shot->id, $brief->id))->handle(new CountingFailJudge, app(ShotStepRetry::class), app(PaidCall::class));
 
         $judgement = $shot->judgements()->sole();
         $this->assertSame(0, $agent->rewrites);

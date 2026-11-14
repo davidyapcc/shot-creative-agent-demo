@@ -4,10 +4,17 @@ declare(strict_types=1);
 
 namespace App\Traits;
 
+use App\DTOs\JudgementResult;
+use App\Enums\JudgementStage;
+use App\Enums\ShotState;
+use App\Events\JudgeVerdictRecorded;
+use App\Events\ShotUpdated;
 use App\Exceptions\ProviderRateLimitedException;
+use App\Models\Judgement;
 use App\Models\Shot;
-use App\Services\Budget;
-use App\Services\RateLimitHitCounter;
+use App\Services\PaidCall;
+use App\Services\ShotStepRetry;
+use Closure;
 use DateTimeInterface;
 use Illuminate\Queue\Middleware\RateLimited;
 use Illuminate\Queue\Middleware\ThrottlesExceptions;
@@ -57,16 +64,48 @@ trait RetriesRateLimitedJudge
     }
 
     /**
-     * A refused request spent no quota, so give the charge back and count the 429.
+     * Pay for one judgement and record its verdict, unless it comes back late.
+     * A pass moves the shot to $onPass when one is given; a fail hands the
+     * shot to the retry.
+     *
+     * @param  Closure(): JudgementResult  $judge
      */
-    protected function releaseRateLimitedJudge(
+    protected function judgeShot(
         Shot $shot,
-        Budget $budget,
-        RateLimitHitCounter $rateLimits,
+        JudgementStage $stage,
         string $operation,
+        Closure $judge,
+        PaidCall $paidCall,
+        ShotStepRetry $retry,
+        ?ShotState $onPass = null,
     ): void {
-        $budget->refundShotStep($shot, 'judge', $operation);
+        $result = $paidCall->forShot(
+            $shot,
+            'judge',
+            $operation,
+            call: $judge,
+            apply: function (Shot $locked, JudgementResult $verdict) use ($stage, $onPass): array {
+                $judgement = Judgement::create($verdict->toModelAttributes($locked->id, $stage));
 
-        $rateLimits->increment('judge');
+                if ($verdict->isPass() && $onPass !== null) {
+                    $locked->transitionTo($onPass);
+                }
+
+                return [$verdict, $judgement];
+            },
+        );
+
+        if (! $result->wasApplied()) {
+            return;
+        }
+
+        [$verdict, $judgement] = $result->value;
+
+        event(JudgeVerdictRecorded::fromVerdict($shot->brief_id, $shot->id, $stage, $verdict));
+        ShotUpdated::dispatch($shot);
+
+        if ($verdict->isFail()) {
+            $retry->afterFailure($shot, $judgement, $stage, $this->batch());
+        }
     }
 }

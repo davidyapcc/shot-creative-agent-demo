@@ -19,7 +19,6 @@ use App\Jobs\RenderShotsJob;
 use App\Models\Brief;
 use App\Models\Judgement;
 use App\Models\Shot;
-use App\Services\Budget;
 use App\Services\PaidCall;
 use App\Services\RateLimitHitCounter;
 use App\Services\ShotStepRetry;
@@ -125,7 +124,7 @@ class ProcessKeyframesJobTest extends TestCase
         $job = new JudgeKeyframeJob($shot->id, $brief->id);
         $this->assertSame('judge', $job->queue);
 
-        $job->handle($judge, app(ShotStepRetry::class), app(Budget::class));
+        $job->handle($judge, app(ShotStepRetry::class), app(PaidCall::class));
 
         $judgement = Judgement::where('shot_id', $shot->id)->first();
         $this->assertNotNull($judgement);
@@ -166,7 +165,7 @@ class ProcessKeyframesJobTest extends TestCase
             ));
 
         $job = new JudgeKeyframeJob($shot->id, $brief->id);
-        $job->handle($failingJudge, app(ShotStepRetry::class), app(Budget::class));
+        $job->handle($failingJudge, app(ShotStepRetry::class), app(PaidCall::class));
 
         $this->assertSame(ShotState::JudgingImage, $shot->refresh()->state);
         $this->assertSame(BriefState::Keyframes, $brief->refresh()->state);

@@ -10,13 +10,18 @@ use App\Contracts\VideoProviderInterface;
 use App\DTOs\JudgementResult;
 use App\DTOs\VideoRenderResult;
 use App\Enums\BriefState;
+use App\Enums\JudgementVerdict;
 use App\Enums\ShotState;
+use App\Events\JudgeVerdictRecorded;
 use App\Events\ShotUpdated;
 use App\Events\VideoProgressUpdated;
 use App\Jobs\GenerateKeyframeJob;
+use App\Jobs\JudgeKeyframeJob;
 use App\Jobs\JudgeVideoJob;
 use App\Jobs\PollVideoRenderJob;
+use App\Jobs\RewritePromptJob;
 use App\Models\Brief;
+use App\Models\Judgement;
 use App\Models\Shot;
 use App\Services\Budget;
 use App\Services\PaidCall;
@@ -147,11 +152,60 @@ class BudgetStopRaceTest extends TestCase
         });
 
         // Act
-        (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(Budget::class));
+        (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(PaidCall::class));
 
         // Assert
         $this->assertSame(ShotState::Failed, $shot->refresh()->state);
         $this->assertSame(BriefState::Muxing, $brief->refresh()->state);
+    }
+
+    public function test_late_keyframe_verdict_records_no_judgement_and_broadcasts_nothing(): void
+    {
+        // Arrange
+        Event::fake([JudgeVerdictRecorded::class, ShotUpdated::class]);
+        [$brief, $shot] = $this->briefWithShot(BriefState::Keyframes, ShotState::JudgingImage);
+
+        $judge = $this->createMock(JudgeInterface::class);
+        $judge->method('judgeImage')->willReturnCallback(function () use ($shot, $brief): JudgementResult {
+            $this->stopForBudget($brief, $shot);
+
+            return new JudgementResult(['prompt_adherence' => 5]);
+        });
+
+        // Act
+        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(PaidCall::class));
+
+        // Assert
+        $this->assertSame(0, Judgement::query()->count());
+        Event::assertNotDispatched(JudgeVerdictRecorded::class);
+        Event::assertNotDispatched(ShotUpdated::class);
+    }
+
+    public function test_late_failing_video_verdict_records_nothing_and_queues_no_rewrite(): void
+    {
+        // Arrange
+        Event::fake([JudgeVerdictRecorded::class, ShotUpdated::class]);
+        [$brief, $shot] = $this->briefWithShot(BriefState::Rendering, ShotState::JudgingVideo);
+
+        $judge = $this->createMock(JudgeInterface::class);
+        $judge->method('judgeVideo')->willReturnCallback(function () use ($shot, $brief): JudgementResult {
+            $this->stopForBudget($brief, $shot);
+
+            return new JudgementResult(
+                scores: ['prompt_adherence' => 1],
+                reason: 'Wrong subject',
+                verdict: JudgementVerdict::Fail,
+            );
+        });
+
+        // Act
+        (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(PaidCall::class));
+
+        // Assert
+        $this->assertSame(0, Judgement::query()->count());
+        Event::assertNotDispatched(JudgeVerdictRecorded::class);
+        Event::assertNotDispatched(ShotUpdated::class);
+        Bus::assertNotDispatched(RewritePromptJob::class);
     }
 
     /**

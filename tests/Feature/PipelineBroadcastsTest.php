@@ -114,7 +114,7 @@ class PipelineBroadcastsTest extends TestCase
 
         Bus::fake([GenerateKeyframeJob::class, JudgeKeyframeJob::class]);
 
-        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(Budget::class));
+        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(PaidCall::class));
 
         Event::assertDispatched(
             JudgeVerdictRecorded::class,
@@ -201,7 +201,7 @@ class PipelineBroadcastsTest extends TestCase
 
         Bus::fake([PollVideoRenderJob::class]);
 
-        (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(Budget::class));
+        (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(PaidCall::class));
 
         Event::assertDispatched(
             JudgeVerdictRecorded::class,

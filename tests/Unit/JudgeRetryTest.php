@@ -20,7 +20,6 @@ use App\Jobs\PollVideoRenderJob;
 use App\Models\Brief;
 use App\Models\Shot;
 use App\Services\Agent\MockAgent;
-use App\Services\Budget;
 use App\Services\PaidCall;
 use App\Services\ShotStepRetry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -67,7 +66,7 @@ class JudgeRetryTest extends TestCase
         $agent = new RecordingAgent;
         $judge = $this->failingImageJudge('Left hand has six fingers.', ['anatomy' => 2, 'prompt_adherence' => 4, 'object_integrity' => 5]);
 
-        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(Budget::class));
+        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(PaidCall::class));
 
         $this->assertSame(BriefState::Keyframes, $brief->refresh()->state);
         $this->assertSame(ShotState::JudgingImage, $other->refresh()->state);
@@ -132,7 +131,7 @@ class JudgeRetryTest extends TestCase
         $agent = new RecordingAgent;
         $judge = $this->failingImageJudge('Still six fingers.', ['anatomy' => 1, 'prompt_adherence' => 4, 'object_integrity' => 5]);
 
-        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(Budget::class));
+        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(PaidCall::class));
 
         $this->assertSame([
             ['prompt' => 'Shot 1: neon alley', 'reason' => 'Left hand has six fingers.'],
@@ -163,8 +162,8 @@ class JudgeRetryTest extends TestCase
         $judge = $this->failingImageJudge('Left hand has six fingers.', ['anatomy' => 2, 'prompt_adherence' => 4, 'object_integrity' => 5], calls: 2);
 
         // Act
-        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(Budget::class));
-        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(Budget::class));
+        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(PaidCall::class));
+        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(PaidCall::class));
 
         // Assert
         $this->assertCount(2, $agent->contexts);
@@ -199,7 +198,7 @@ class JudgeRetryTest extends TestCase
         $agent = new RecordingAgent;
         $judge = $this->failingImageJudge('Still six fingers.', ['anatomy' => 1]);
 
-        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(Budget::class));
+        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(PaidCall::class));
 
         $this->assertSame([], $agent->contexts);
         $this->assertSame(ShotState::Failed, $shot->refresh()->state);
@@ -294,7 +293,7 @@ class JudgeRetryTest extends TestCase
                 verdict: JudgementVerdict::Fail,
             ));
 
-        (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(Budget::class));
+        (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, $this->retryWith($agent), app(PaidCall::class));
 
         $this->assertSame([
             ['prompt' => 'Shot 1: original', 'reason' => 'Extreme temporal flicker'],
