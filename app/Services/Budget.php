@@ -15,12 +15,14 @@ class Budget
 {
     public const UNIT_COST = 1;
 
+    public const FREE_COST = 0;
+
     public function __construct(
         private readonly DegradedCompletion $completion,
     ) {}
 
     /**
-     * Record one provider call. Free and mock calls cost one unit.
+     * Charge one paid call. Calls to free and mock providers still cost one unit.
      */
     public function charge(Brief $brief, string $provider, string $operation, ?int $shotId = null): void
     {
@@ -32,21 +34,45 @@ class Budget
                 throw new BudgetExceededException("Brief {$brief->id} is at its provider budget cap.");
             }
 
-            $metadata = $locked->metadata ?? [];
-            $ledger = $metadata['budget_ledger'] ?? [];
-            $entry = [
-                'provider' => $provider,
-                'operation' => $operation,
-                'cost' => self::UNIT_COST,
-            ];
-            $ledger[] = $shotId === null ? $entry : [...$entry, 'shot_id' => $shotId];
-            $metadata['budget_ledger'] = $ledger;
-
             $locked->update([
                 'budget_used' => $locked->budget_used + self::UNIT_COST,
-                'metadata' => $metadata,
+                'metadata' => $this->withLedgerEntry($locked, $provider, $operation, self::UNIT_COST, $shotId),
             ]);
         });
+    }
+
+    /**
+     * Meter a provider call that spends nothing, such as a render poll. It is
+     * logged at zero cost and never triggers the budget stop. Returns false
+     * when the shot is no longer live and the call must not run.
+     */
+    public function meterFreeShotCall(Shot $shot, string $provider, string $operation): bool
+    {
+        if ($shot->state === ShotState::Failed) {
+            return false;
+        }
+
+        $isMetered = DB::transaction(function () use ($shot, $provider, $operation): bool {
+            $locked = Brief::query()->whereKey($shot->brief_id)->lockForUpdate()->first();
+
+            if ($locked === null) {
+                return true;
+            }
+
+            if ($locked->isBudgetExhausted()) {
+                return false;
+            }
+
+            $locked->update([
+                'metadata' => $this->withLedgerEntry($locked, $provider, $operation, self::FREE_COST, $shot->id),
+            ]);
+
+            return true;
+        });
+
+        $shot->refresh();
+
+        return $isMetered && $shot->state !== ShotState::Failed;
     }
 
     /**
@@ -172,6 +198,25 @@ class Budget
         });
 
         $shot->brief->refresh();
+    }
+
+    /**
+     * The brief's metadata with one more ledger entry.
+     *
+     * @return array<string, mixed>
+     */
+    private function withLedgerEntry(Brief $brief, string $provider, string $operation, int $cost, ?int $shotId): array
+    {
+        $entry = ['provider' => $provider, 'operation' => $operation, 'cost' => $cost];
+        $metadata = $brief->metadata ?? [];
+
+        return [
+            ...$metadata,
+            'budget_ledger' => [
+                ...$metadata['budget_ledger'] ?? [],
+                $shotId === null ? $entry : [...$entry, 'shot_id' => $shotId],
+            ],
+        ];
     }
 
     /**

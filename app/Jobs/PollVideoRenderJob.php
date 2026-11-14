@@ -72,7 +72,8 @@ class PollVideoRenderJob implements ShouldQueue
 
         $shot = Shot::with('brief')->find($this->shotId);
 
-        if ($shot === null || ! $budget->chargeShotStep($shot, 'video', 'poll')) {
+        // Only the submit spends budget; a poll is metered at zero cost.
+        if ($shot === null || ! $budget->meterFreeShotCall($shot, 'video', 'poll')) {
             return;
         }
 
