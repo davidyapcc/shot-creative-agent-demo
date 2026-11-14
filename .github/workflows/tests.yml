@@ -1,0 +1,58 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: PHPUnit with 80% coverage gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP with pcov
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_sqlite, bcmath, pcntl, zip
+          coverage: pcov
+          tools: composer:v2
+
+      # MuxFinalVideoJobTest and the ffmpeg_motion provider tests shell out to ffmpeg/ffprobe.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      # The welcome page tests render @vite, which needs public/build/manifest.json.
+      - name: Build frontend assets
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+
+      # phpunit.xml pins DB, queue and providers; the app still needs an APP_KEY.
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate --ansi
+
+      - name: Run tests with coverage gate
+        run: composer test:coverage
