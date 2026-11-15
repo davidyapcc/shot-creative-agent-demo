@@ -112,6 +112,30 @@ class Shot extends Model
     }
 
     /**
+     * Move to $target under a row lock, when the shot is still live and the
+     * move is allowed. A stale copy of the shot never overwrites a stop that
+     * failed it in the meantime. Returns false when the shot did not move.
+     */
+    public function advanceIfAllowed(ShotState $target): bool
+    {
+        $isAdvanced = DB::transaction(function () use ($target): bool {
+            $locked = self::query()->whereKey($this->id)->lockForUpdate()->firstOrFail();
+
+            if ($locked->state === ShotState::Failed || ! $locked->state->canTransitionTo($target)) {
+                return false;
+            }
+
+            $locked->transitionTo($target);
+
+            return true;
+        });
+
+        $this->refresh();
+
+        return $isAdvanced;
+    }
+
+    /**
      * Move on after a provider call, unless the budget stop failed this shot
      * while the call was in flight. Returns false when the result must be dropped.
      */

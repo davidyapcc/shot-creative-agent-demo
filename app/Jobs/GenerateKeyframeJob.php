@@ -99,8 +99,8 @@ class GenerateKeyframeJob implements ShouldQueue
      */
     private function generate(Shot $shot, ImageProviderInterface $imageProvider): string
     {
-        if ($shot->state->canTransitionTo(ShotState::GeneratingImage)) {
-            $shot->transitionTo(ShotState::GeneratingImage);
+        // Locked, so a budget stop that failed the shot since the charge is never overwritten.
+        if ($shot->advanceIfAllowed(ShotState::GeneratingImage)) {
             ShotUpdated::dispatch($shot);
         }
 
