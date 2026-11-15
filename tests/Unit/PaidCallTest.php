@@ -16,6 +16,7 @@ use App\Services\RateLimitHitCounter;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -165,6 +166,68 @@ class PaidCallTest extends TestCase
             $this->assertSame(1, $shot->attempts);
             $this->assertSame(0, app(RateLimitHitCounter::class)->total());
         }
+    }
+
+    public function test_a_failed_generation_counts_even_after_the_shot_was_stopped_mid_call(): void
+    {
+        // Arrange
+        [$brief, $shot] = $this->briefWithShot();
+        $caught = null;
+
+        // Act
+        try {
+            app(PaidCall::class)->forShot(
+                $shot,
+                'image',
+                'generateImage',
+                call: function () use ($shot): never {
+                    Shot::query()->whereKey($shot->id)->update(['state' => ShotState::Failed->value]);
+
+                    throw new RuntimeException('HTTP 500');
+                },
+                apply: fn () => $this->fail('A failed call has no result to apply.'),
+                onFailure: fn (Shot $locked) => $locked->recordStepAttempt('image'),
+            );
+        } catch (RuntimeException $exception) {
+            $caught = $exception;
+        }
+
+        // Assert
+        $this->assertSame('HTTP 500', $caught?->getMessage());
+        $shot->refresh();
+        $this->assertSame(ShotState::Failed, $shot->state);
+        $this->assertSame(1, $shot->attempts);
+        $this->assertSame(1, $brief->refresh()->budget_used);
+    }
+
+    public function test_a_cleanup_error_after_a_429_is_logged_and_the_429_still_surfaces(): void
+    {
+        // Arrange
+        Log::spy();
+        [, $shot] = $this->briefWithShot();
+        $caught = null;
+        $breakingClaim = new PaidCallClaim(
+            take: fn (): bool => true,
+            release: fn () => throw new RuntimeException('Lost the database connection.'),
+        );
+
+        // Act
+        try {
+            app(PaidCall::class)->forShot(
+                $shot,
+                'agent',
+                'rewritePrompt',
+                call: fn () => throw new ProviderRateLimitedException('HTTP 429'),
+                apply: fn () => $this->fail('A refused call has no result to apply.'),
+                claim: $breakingClaim,
+            );
+        } catch (ProviderRateLimitedException $exception) {
+            $caught = $exception;
+        }
+
+        // Assert
+        $this->assertSame('HTTP 429', $caught?->getMessage());
+        Log::shouldHaveReceived('error')->once();
     }
 
     public function test_a_lost_claim_refunds_the_charge_and_never_calls_the_provider(): void
