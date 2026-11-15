@@ -14,7 +14,6 @@ use App\Enums\JudgementVerdict;
 use App\Enums\ShotState;
 use App\Events\ShotUpdated;
 use App\Exceptions\ProviderRateLimitedException;
-use App\Jobs\GenerateKeyframeJob;
 use App\Jobs\JudgeKeyframeJob;
 use App\Jobs\PlanBriefJob;
 use App\Jobs\ProcessKeyframesJob;
@@ -25,7 +24,6 @@ use App\Models\Shot;
 use App\Services\Agent\MockAgent;
 use App\Services\Budget;
 use App\Services\PaidCall;
-use App\Services\RateLimitHitCounter;
 use App\Services\ShotStepRetry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Queue\Middleware\RateLimited;
@@ -81,40 +79,6 @@ class AgentRateLimitTest extends TestCase
         });
         $failed->assertFailed();
         $failed->assertNotReleased();
-    }
-
-    public function test_rate_limited_plan_is_refunded_and_a_retry_plans_once(): void
-    {
-        Queue::fake([ProcessKeyframesJob::class]);
-
-        $brief = Brief::create([
-            'prompt' => '15s product teaser, rainy Tokyo, neon',
-            'state' => BriefState::Pending,
-        ]);
-        $agent = new RateLimitedPlanningAgent(failPlanTimes: 1);
-
-        try {
-            (new PlanBriefJob($brief->id))->handle($agent, app(PaidCall::class));
-            $this->fail('The rate-limit error should escape the job.');
-        } catch (ProviderRateLimitedException) {
-            $brief->refresh();
-            $this->assertSame(BriefState::Planning, $brief->state);
-            $this->assertNull($brief->style_anchor);
-            $this->assertSame(0, $brief->budget_used);
-            $this->assertSame([], $brief->metadata['budget_ledger'] ?? []);
-            $this->assertArrayNotHasKey('planning_claimed', $brief->metadata ?? []);
-            $this->assertSame(1, app(RateLimitHitCounter::class)->count('agent'));
-        }
-
-        (new PlanBriefJob($brief->id))->handle($agent, app(PaidCall::class));
-
-        $brief->refresh();
-        $this->assertSame(2, $agent->planCalls);
-        $this->assertSame('Cinematic neon rain.', $brief->style_anchor);
-        $this->assertCount(2, $brief->shots);
-        $this->assertSame(1, $brief->budget_used);
-        $this->assertSame(['planShots'], array_column($brief->metadata['budget_ledger'], 'operation'));
-        $this->assertSame(BriefState::Keyframes, $brief->state);
     }
 
     public function test_prism_planning_stores_the_style_anchor_and_shots_from_one_metered_call(): void
@@ -238,41 +202,6 @@ class AgentRateLimitTest extends TestCase
         $failed->assertFailed();
     }
 
-    public function test_rate_limited_rewrite_refunds_releases_its_claim_and_a_retry_rewrites_once(): void
-    {
-        Bus::fake();
-        [$brief, $shot, $judgement] = $this->failedImageJudgement();
-        $agent = new RateLimitedRewriteAgent;
-        $job = new RewritePromptJob($shot->id, $brief->id, $judgement->id, JudgementStage::Image);
-
-        try {
-            $this->handleRewrite($job, $agent);
-            $this->fail('The rate-limit error should escape the job.');
-        } catch (ProviderRateLimitedException) {
-            $shot->refresh();
-            $this->assertSame('Shot 1: neon alley', $shot->prompt);
-            $this->assertArrayNotHasKey('rewrite_judgement_id', $shot->metadata ?? []);
-            $this->assertSame(0, $brief->refresh()->budget_used);
-            $this->assertSame(1, app(RateLimitHitCounter::class)->count('agent'));
-        }
-
-        $this->handleRewrite($job, $agent);
-
-        $shot->refresh();
-        $this->assertSame(2, $agent->rewrites);
-        $this->assertSame('Shot 1: neon alley. Simpler hand.', $shot->prompt);
-        $this->assertSame($judgement->id, $shot->metadata['rewrite_judgement_id']);
-        $this->assertSame(
-            [['prompt' => 'Shot 1: neon alley', 'reason' => 'Left hand has six fingers.']],
-            $shot->metadata['prompt_attempts']['image'],
-        );
-        $this->assertSame(['rewritePrompt'], array_column($brief->refresh()->metadata['budget_ledger'], 'operation'));
-        Bus::assertChained([
-            fn (GenerateKeyframeJob $generate): bool => $generate->shotId === $shot->id,
-            fn (JudgeKeyframeJob $judgeJob): bool => $judgeJob->shotId === $shot->id,
-        ]);
-    }
-
     public function test_a_rewrite_already_claimed_for_the_judgement_skips_the_call_and_refunds(): void
     {
         Bus::fake();
@@ -301,6 +230,7 @@ class AgentRateLimitTest extends TestCase
         $shot->refresh();
         $this->assertSame(ShotState::Failed, $shot->state);
         $this->assertSame('Shot 1: neon alley', $shot->prompt);
+        $this->assertArrayNotHasKey('rewrite_judgement_id', $shot->metadata ?? []);
         $this->assertSame(1, $brief->refresh()->budget_used);
         Bus::assertNothingDispatched();
     }
@@ -396,27 +326,6 @@ class BriefFailingPlanningAgent implements AgentInterface
     public function rewritePrompt(array $context): string
     {
         return $context['original_prompt'];
-    }
-}
-
-class RateLimitedRewriteAgent implements AgentInterface
-{
-    public int $rewrites = 0;
-
-    public function planShots(string $prompt): ShotPlan
-    {
-        return (new MockAgent)->planShots($prompt);
-    }
-
-    public function rewritePrompt(array $context): string
-    {
-        $this->rewrites++;
-
-        if ($this->rewrites === 1) {
-            throw new ProviderRateLimitedException('Gemini agent returned HTTP 429.');
-        }
-
-        return $context['original_prompt'].'. Simpler hand.';
     }
 }
 

@@ -31,7 +31,7 @@ class RewritePromptJob implements ShouldQueue
     private const OPERATION = 'rewritePrompt';
 
     /**
-     * The judgement whose rewrite is in flight or done. A second copy of this
+     * The judgement whose rewrite is claimed or done. A second copy of this
      * job for the same judgement finds it set and does not pay again.
      */
     private const CLAIM_KEY = 'rewrite_judgement_id';

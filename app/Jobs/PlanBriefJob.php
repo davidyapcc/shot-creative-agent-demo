@@ -31,7 +31,7 @@ class PlanBriefJob implements ShouldQueue
     private const PLAN_OPERATION = 'planShots';
 
     /**
-     * Brief metadata flag held while a worker's plan call is in flight.
+     * Brief metadata key that marks the plan's claim.
      */
     private const CLAIM_KEY = 'planning_claimed';
 
@@ -98,7 +98,7 @@ class PlanBriefJob implements ShouldQueue
     }
 
     /**
-     * The claim is a flag in the brief's metadata, held while a plan call is in flight.
+     * The claim is the planning_claimed marker in the brief's metadata, set until the plan is stored or given back.
      */
     private function claim(): PaidCallClaim
     {

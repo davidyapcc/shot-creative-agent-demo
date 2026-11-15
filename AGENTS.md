@@ -16,12 +16,15 @@ Every provider call is metered against the brief budget, and every one except a 
 
 Make every paid call through `App\Services\PaidCall` (`forShot` for a shot step, `forBrief` for a brief step). It owns the order: charge, claim, call, refund on a 429, re-check under a row lock, then apply or drop the late result. Only `PaidCall` calls `Budget` to charge or refund; `PaidCallOwnershipTest` goes red otherwise.
 
-The module cannot enforce these:
+Using the module, you still have to:
 
-- **Write only in `apply`.** Database writes go in the `apply` closure, on the locked row it hands you. Broadcast and dispatch after the call returns, and only when the result `wasApplied()`.
+- **Write only in `apply`.** Database writes go in the `apply` closure, on the locked row it hands you. Broadcast and dispatch after the call returns, and only when the result `wasApplied()`. A state move before the call goes through `Shot::advanceIfAllowed`, never a stale `transitionTo`.
 - **Claim one-shot work.** Pass a `PaidCallClaim` whose `take` and `release` set and clear the step's own marker (as `GenerateAudioJob::claim` does), so a retry or an overlapping job never pays twice.
 - **Count a failed generation.** Pass `onFailure` to record the attempt; `shots.attempts` counts every generation, image and video together.
-- **Polls are metered, never charged.** Only the video submit spends budget. Log each poll at zero cost with `Budget::meterFreeShotCall`; on `false`, stop polling.
+
+Outside the module:
+
+- **Polls are metered, never charged.** Only the video submit spends budget. Log each poll at zero cost with `Budget::meterFreeShotCall`; on `false`, stop polling. A finished render drops its late result with `Shot::advanceUnlessStopped`.
 - **Fail early.** Once no shot can pass, fail the brief before the next stage spends anything.
 - `shots.prompt` holds the latest rewrite; rewrites read the planned scene from `metadata['original_prompt']`.
 

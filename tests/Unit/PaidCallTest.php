@@ -118,6 +118,8 @@ class PaidCallTest extends TestCase
         [$brief, $shot] = $this->briefWithShot();
         $applied = false;
 
+        $caught = null;
+
         // Act
         try {
             app(PaidCall::class)->forShot(
@@ -130,21 +132,25 @@ class PaidCallTest extends TestCase
                 },
                 claim: $this->metadataClaim('rewrite_claimed'),
             );
-            $this->fail('The 429 was swallowed.');
-        } catch (ProviderRateLimitedException) {
-            // Assert
-            $this->assertFalse($applied);
-            $this->assertSame(0, $brief->refresh()->budget_used);
-            $this->assertSame([], $brief->metadata['budget_ledger']);
-            $this->assertArrayNotHasKey('rewrite_claimed', $shot->refresh()->metadata ?? []);
-            $this->assertSame(1, app(RateLimitHitCounter::class)->count('agent'));
+        } catch (ProviderRateLimitedException $exception) {
+            $caught = $exception;
         }
+
+        // Assert
+        $this->assertInstanceOf(ProviderRateLimitedException::class, $caught, 'The 429 was swallowed.');
+        $this->assertFalse($applied);
+        $this->assertSame(0, $brief->refresh()->budget_used);
+        $this->assertSame([], $brief->metadata['budget_ledger']);
+        $this->assertArrayNotHasKey('rewrite_claimed', $shot->refresh()->metadata ?? []);
+        $this->assertSame(1, app(RateLimitHitCounter::class)->count('agent'));
     }
 
     public function test_any_other_failure_keeps_the_charge_and_the_claim_and_reports_to_the_step(): void
     {
         // Arrange
         [$brief, $shot] = $this->briefWithShot();
+
+        $caught = null;
 
         // Act
         try {
@@ -157,15 +163,17 @@ class PaidCallTest extends TestCase
                 claim: $this->metadataClaim('claimed'),
                 onFailure: fn (Shot $locked) => $locked->recordStepAttempt('image'),
             );
-            $this->fail('The failure was swallowed.');
         } catch (RuntimeException $exception) {
-            // Assert
-            $this->assertSame('HTTP 500', $exception->getMessage());
-            $this->assertSame(1, $brief->refresh()->budget_used);
-            $this->assertTrue($shot->refresh()->metadata['claimed']);
-            $this->assertSame(1, $shot->attempts);
-            $this->assertSame(0, app(RateLimitHitCounter::class)->total());
+            $caught = $exception;
         }
+
+        // Assert
+        $this->assertInstanceOf(RuntimeException::class, $caught, 'The failure was swallowed.');
+        $this->assertSame('HTTP 500', $caught->getMessage());
+        $this->assertSame(1, $brief->refresh()->budget_used);
+        $this->assertTrue($shot->refresh()->metadata['claimed']);
+        $this->assertSame(1, $shot->attempts);
+        $this->assertSame(0, app(RateLimitHitCounter::class)->total());
     }
 
     public function test_a_failed_generation_counts_even_after_the_shot_was_stopped_mid_call(): void
@@ -353,6 +361,8 @@ class PaidCallTest extends TestCase
         // Arrange
         [$brief] = $this->briefWithShot(BriefState::Planning);
 
+        $caught = null;
+
         // Act
         try {
             app(PaidCall::class)->forBrief(
@@ -364,13 +374,15 @@ class PaidCallTest extends TestCase
                 apply: fn () => $this->fail('A refused call has no result to apply.'),
                 claim: $this->metadataClaim('claimed'),
             );
-            $this->fail('The 429 was swallowed.');
-        } catch (ProviderRateLimitedException) {
-            // Assert
-            $this->assertSame(0, $brief->budget_used);
-            $this->assertArrayNotHasKey('claimed', $brief->metadata);
-            $this->assertSame(1, app(RateLimitHitCounter::class)->count('agent'));
+        } catch (ProviderRateLimitedException $exception) {
+            $caught = $exception;
         }
+
+        // Assert
+        $this->assertInstanceOf(ProviderRateLimitedException::class, $caught, 'The 429 was swallowed.');
+        $this->assertSame(0, $brief->budget_used);
+        $this->assertArrayNotHasKey('claimed', $brief->metadata);
+        $this->assertSame(1, app(RateLimitHitCounter::class)->count('agent'));
     }
 
     /**

@@ -85,18 +85,22 @@ class ShotVideoSubmitterTest extends TestCase
         $videos = $this->createMock(VideoProviderInterface::class);
         $videos->method('submit')->willThrowException(new ProviderRateLimitedException('HTTP 429'));
 
+        $caught = null;
+
         // Act
         try {
             app(ShotVideoSubmitter::class)->submit($shot, $videos);
-            $this->fail('The 429 was swallowed.');
-        } catch (ProviderRateLimitedException) {
-            // Assert
-            $shot->refresh();
-            $this->assertSame(0, $brief->refresh()->budget_used);
-            $this->assertSame(0, $shot->attempts);
-            $this->assertTrue($shot->state->canTransitionTo(ShotState::GeneratingVideo));
-            $this->assertSame(1, app(RateLimitHitCounter::class)->count('video'));
+        } catch (ProviderRateLimitedException $exception) {
+            $caught = $exception;
         }
+
+        // Assert
+        $this->assertInstanceOf(ProviderRateLimitedException::class, $caught, 'The 429 was swallowed.');
+        $shot->refresh();
+        $this->assertSame(0, $brief->refresh()->budget_used);
+        $this->assertSame(0, $shot->attempts);
+        $this->assertTrue($shot->state->canTransitionTo(ShotState::GeneratingVideo));
+        $this->assertSame(1, app(RateLimitHitCounter::class)->count('video'));
     }
 
     public function test_a_submit_that_fails_any_other_way_keeps_its_charge_and_counts_an_attempt(): void
@@ -106,17 +110,21 @@ class ShotVideoSubmitterTest extends TestCase
         $videos = $this->createMock(VideoProviderInterface::class);
         $videos->method('submit')->willThrowException(new RuntimeException('HTTP 500'));
 
+        $caught = null;
+
         // Act
         try {
             app(ShotVideoSubmitter::class)->submit($shot, $videos);
-            $this->fail('The failure was swallowed.');
-        } catch (RuntimeException) {
-            // Assert
-            $shot->refresh();
-            $this->assertSame(1, $brief->refresh()->budget_used);
-            $this->assertSame(1, $shot->attempts);
-            $this->assertSame(1, $shot->metadata['step_attempts']['video']);
+        } catch (RuntimeException $exception) {
+            $caught = $exception;
         }
+
+        // Assert
+        $this->assertInstanceOf(RuntimeException::class, $caught, 'The failure was swallowed.');
+        $shot->refresh();
+        $this->assertSame(1, $brief->refresh()->budget_used);
+        $this->assertSame(1, $shot->attempts);
+        $this->assertSame(1, $shot->metadata['step_attempts']['video']);
     }
 
     /**
