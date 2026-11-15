@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\Contracts\VideoProviderInterface;
 use App\Enums\JudgementStage;
 use App\Enums\ShotState;
 use App\Jobs\GenerateKeyframeJob;
 use App\Jobs\JudgeKeyframeJob;
 use App\Jobs\RewritePromptJob;
+use App\Jobs\SubmitVideoRenderJob;
 use App\Models\Judgement;
 use App\Models\Shot;
 use Illuminate\Bus\Batch;
@@ -18,11 +18,6 @@ use Illuminate\Support\Facades\Bus;
 class ShotStepRetry
 {
     public const MAX_RETRIES = 2;
-
-    public function __construct(
-        private readonly ShotVideoSubmitter $submitter,
-        private readonly VideoProviderInterface $videos,
-    ) {}
 
     /**
      * Queue the rewrite for a failed judgement, unless the step's retries are
@@ -59,7 +54,7 @@ class ShotStepRetry
      */
     private function hasUsedAllRetries(Shot $shot, JudgementStage $stage): bool
     {
-        $used = (int) ($shot->metadata['step_attempts'][$stage->value] ?? 0);
+        $used = $shot->stepAttempts($stage->value);
 
         if ($used <= self::MAX_RETRIES) {
             return false;
@@ -72,21 +67,13 @@ class ShotStepRetry
         return true;
     }
 
+    /**
+     * The resubmit runs in its own job, so a 429 on it retries only the submit
+     * and never this rewrite, whose claim is already spent.
+     */
     private function resubmitVideo(Shot $shot, ?Batch $batch): void
     {
-        $poll = $this->submitter->submit($shot, $this->videos);
-
-        if ($poll === null) {
-            return;
-        }
-
-        if ($batch !== null) {
-            $batch->add([$poll]);
-
-            return;
-        }
-
-        dispatch($poll);
+        $this->dispatch(SubmitVideoRenderJob::forShot($shot), $batch);
     }
 
     /**

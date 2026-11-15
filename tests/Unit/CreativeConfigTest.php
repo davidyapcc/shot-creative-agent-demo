@@ -21,6 +21,7 @@ class CreativeConfigTest extends TestCase
         'IMAGE_MODEL',
         'IMAGE_REQUESTS_PER_MINUTE',
         'VIDEO_PROVIDER',
+        'VIDEO_REQUESTS_PER_MINUTE',
         'AUDIO_PROVIDER',
         'AUDIO_REQUESTS_PER_MINUTE',
     ];
@@ -54,6 +55,7 @@ class CreativeConfigTest extends TestCase
         $this->assertSame('@cf/black-forest-labs/flux-1-schnell', $config['image_model']);
         $this->assertSame(10, $config['image_requests_per_minute']);
         $this->assertSame('replay', $config['video']);
+        $this->assertSame(10, $config['video_requests_per_minute']);
         $this->assertSame('replay', $config['audio']);
         $this->assertSame(10, $config['audio_requests_per_minute']);
     }
@@ -67,6 +69,7 @@ class CreativeConfigTest extends TestCase
             'IMAGE_MODEL' => '@cf/black-forest-labs/flux-2-dev',
             'IMAGE_REQUESTS_PER_MINUTE' => '4',
             'VIDEO_PROVIDER' => 'veo',
+            'VIDEO_REQUESTS_PER_MINUTE' => '3',
             'AUDIO_PROVIDER' => 'elevenlabs',
             'AUDIO_REQUESTS_PER_MINUTE' => '2',
         ]);
@@ -79,6 +82,7 @@ class CreativeConfigTest extends TestCase
         $this->assertSame('@cf/black-forest-labs/flux-2-dev', $config['image_model']);
         $this->assertSame(4, $config['image_requests_per_minute']);
         $this->assertSame('veo', $config['video']);
+        $this->assertSame(3, $config['video_requests_per_minute']);
         $this->assertSame('elevenlabs', $config['audio']);
         $this->assertSame(2, $config['audio_requests_per_minute']);
     }

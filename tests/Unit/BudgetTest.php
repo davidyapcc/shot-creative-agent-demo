@@ -168,8 +168,9 @@ class BudgetTest extends TestCase
 
         $video = $this->createMock(VideoProviderInterface::class);
         $video->expects($this->never())->method('submit');
+        $this->app->instance(VideoProviderInterface::class, $video);
 
-        (new RenderShotsJob($brief->id))->handle($video);
+        (new RenderShotsJob($brief->id))->handle();
 
         $brief->refresh();
         $this->assertSame(BriefState::Degraded, $brief->state);
