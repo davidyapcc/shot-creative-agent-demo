@@ -8,7 +8,6 @@ use App\Contracts\AgentInterface;
 use App\Contracts\AudioProviderInterface;
 use App\Contracts\ImageProviderInterface;
 use App\Contracts\JudgeInterface;
-use App\Contracts\VideoProviderInterface;
 use App\Enums\BriefState;
 use App\Enums\JudgementVerdict;
 use App\Enums\ShotState;
@@ -127,9 +126,8 @@ class WalkingSkeletonTest extends TestCase
         Queue::assertPushed(RenderShotsJob::class);
 
         // Stage 3: Rendering
-        $videoProvider = app(VideoProviderInterface::class);
         $renderJob = new RenderShotsJob($brief->id);
-        $renderJob->handle($videoProvider);
+        $renderJob->handle();
 
         $brief->refresh();
         $this->assertSame(BriefState::Audio, $brief->state);

@@ -41,7 +41,7 @@ class ShotVideoSubmitterTest extends TestCase
         $videos->method('submit')->willReturn('render-1');
 
         // Act
-        $poll = app(ShotVideoSubmitter::class)->submit($shot, $videos);
+        $poll = app(ShotVideoSubmitter::class)->submit($shot, $videos, 0);
 
         // Assert
         $this->assertInstanceOf(PollVideoRenderJob::class, $poll);
@@ -66,7 +66,7 @@ class ShotVideoSubmitterTest extends TestCase
         });
 
         // Act
-        $poll = app(ShotVideoSubmitter::class)->submit($shot, $videos);
+        $poll = app(ShotVideoSubmitter::class)->submit($shot, $videos, 0);
 
         // Assert
         $this->assertNull($poll);
@@ -89,7 +89,7 @@ class ShotVideoSubmitterTest extends TestCase
 
         // Act
         try {
-            app(ShotVideoSubmitter::class)->submit($shot, $videos);
+            app(ShotVideoSubmitter::class)->submit($shot, $videos, 0);
         } catch (ProviderRateLimitedException $exception) {
             $caught = $exception;
         }
@@ -114,7 +114,7 @@ class ShotVideoSubmitterTest extends TestCase
 
         // Act
         try {
-            app(ShotVideoSubmitter::class)->submit($shot, $videos);
+            app(ShotVideoSubmitter::class)->submit($shot, $videos, 0);
         } catch (RuntimeException $exception) {
             $caught = $exception;
         }

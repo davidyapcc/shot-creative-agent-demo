@@ -65,6 +65,14 @@ class Shot extends Model
     }
 
     /**
+     * Generations of one step ('image' or 'video'), failed ones included.
+     */
+    public function stepAttempts(string $step): int
+    {
+        return (int) ($this->metadata['step_attempts'][$step] ?? 0);
+    }
+
+    /**
      * Generations after the first image attempt and the first video attempt.
      * Without step_attempts, attempts minus the stages the shot reached.
      */

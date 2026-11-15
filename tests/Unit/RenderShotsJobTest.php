@@ -11,6 +11,7 @@ use App\Jobs\AdvanceBriefToAudioCallback;
 use App\Jobs\FailBriefOnBatchFailureCallback;
 use App\Jobs\GenerateAudioJob;
 use App\Jobs\RenderShotsJob;
+use App\Jobs\SubmitVideoRenderJob;
 use App\Models\Brief;
 use App\Models\Shot;
 use Illuminate\Bus\Batch;
@@ -25,16 +26,17 @@ class RenderShotsJobTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_render_shots_job_submits_renders_and_dispatches_parallel_batch(): void
+    public function test_render_shots_job_batches_one_submit_per_renderable_shot_without_calling_the_provider(): void
     {
-        Bus::fake([GenerateAudioJob::class]);
+        // Arrange
+        Bus::fake();
 
         $brief = Brief::create([
             'prompt' => '15s product teaser',
             'state' => BriefState::Rendering,
         ]);
 
-        $shot1 = Shot::create([
+        $renderable = Shot::create([
             'brief_id' => $brief->id,
             'sequence' => 1,
             'prompt' => 'Shot 1 prompt',
@@ -42,34 +44,29 @@ class RenderShotsJobTest extends TestCase
             'keyframe_path' => 'keyframes/shot_1.png',
         ]);
 
-        $shot2 = Shot::create([
+        Shot::create([
             'brief_id' => $brief->id,
             'sequence' => 2,
             'prompt' => 'Shot 2 prompt',
-            'state' => ShotState::JudgingImage,
-            'keyframe_path' => 'keyframes/shot_2.png',
+            'state' => ShotState::Failed,
         ]);
 
         $videoProvider = $this->createMock(VideoProviderInterface::class);
-        $videoProvider->expects($this->exactly(2))
-            ->method('submit')
-            ->willReturnOnConsecutiveCalls('render-id-1', 'render-id-2');
+        $videoProvider->expects($this->never())->method('submit');
+        $this->app->instance(VideoProviderInterface::class, $videoProvider);
 
-        $job = new RenderShotsJob($brief->id);
-        $job->handle($videoProvider);
+        // Act
+        (new RenderShotsJob($brief->id))->handle();
 
-        $shot1->refresh();
-        $shot2->refresh();
+        // Assert
+        $this->assertSame(ShotState::JudgingImage, $renderable->refresh()->state);
+        Bus::assertBatched(function (PendingBatch $batch) use ($renderable): bool {
+            $submit = $batch->jobs->first();
 
-        $this->assertSame(ShotState::GeneratingVideo, $shot1->state);
-        $this->assertSame(ShotState::GeneratingVideo, $shot2->state);
-        $this->assertSame('render-id-1', $shot1->metadata['render_id']);
-        $this->assertSame('render-id-2', $shot2->metadata['render_id']);
-
-        Bus::assertBatched(function (PendingBatch $batch) {
-            $this->assertCount(2, $batch->jobs);
-
-            return true;
+            return $batch->jobs->count() === 1
+                && $submit instanceof SubmitVideoRenderJob
+                && $submit->shotId === $renderable->id
+                && $submit->priorVideoAttempts === 0;
         });
     }
 
@@ -92,15 +89,13 @@ class RenderShotsJobTest extends TestCase
             ]);
         }
 
-        $videoProvider = $this->createMock(VideoProviderInterface::class);
-        $videoProvider->expects($this->never())->method('submit');
-
         // Act
-        (new RenderShotsJob($brief->id))->handle($videoProvider);
+        (new RenderShotsJob($brief->id))->handle();
 
         // Assert
         $this->assertSame(BriefState::Failed, $brief->refresh()->state);
         Bus::assertNothingBatched();
+        Bus::assertNotDispatched(SubmitVideoRenderJob::class);
     }
 
     public function test_render_shots_job_leaves_a_budget_exhausted_brief_to_degraded_completion(): void
@@ -119,10 +114,8 @@ class RenderShotsJobTest extends TestCase
             'state' => ShotState::Failed,
         ]);
 
-        $videoProvider = $this->createMock(VideoProviderInterface::class);
-
         // Act
-        (new RenderShotsJob($brief->id))->handle($videoProvider);
+        (new RenderShotsJob($brief->id))->handle();
 
         // Assert
         $this->assertSame(BriefState::Degraded, $brief->refresh()->state);

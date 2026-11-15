@@ -14,6 +14,7 @@ use App\Jobs\GenerateAudioJob;
 use App\Jobs\GenerateKeyframeJob;
 use App\Jobs\JudgeKeyframeJob;
 use App\Jobs\PlanBriefJob;
+use App\Jobs\SubmitVideoRenderJob;
 use App\Listeners\BroadcastFinishedBriefTelemetry;
 use App\Services\Agent\MockAgent;
 use App\Services\Agent\PrismAgent;
@@ -179,6 +180,10 @@ class AppServiceProvider extends ServiceProvider
 
         RateLimiter::for(GenerateKeyframeJob::RATE_LIMITER, function (): Limit {
             return Limit::perMinute((int) config('creative.image_requests_per_minute'));
+        });
+
+        RateLimiter::for(SubmitVideoRenderJob::RATE_LIMITER, function (): Limit {
+            return Limit::perMinute((int) config('creative.video_requests_per_minute'));
         });
 
         RateLimiter::for(GenerateAudioJob::RATE_LIMITER, function (): Limit {

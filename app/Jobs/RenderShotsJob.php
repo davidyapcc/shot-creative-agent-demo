@@ -4,10 +4,9 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
-use App\Contracts\VideoProviderInterface;
 use App\Enums\ShotState;
 use App\Models\Brief;
-use App\Services\ShotVideoSubmitter;
+use App\Models\Shot;
 use App\Traits\FailsBriefOnJobFailure;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -25,32 +24,28 @@ class RenderShotsJob implements ShouldQueue
         $this->onQueue('generate');
     }
 
-    public function handle(VideoProviderInterface $videoProvider): void
+    /**
+     * Queue one submit per shot that passed its keyframe, in one batch. Each
+     * submit adds its poll to the batch, so the batch ends only once every
+     * shot has rendered, been judged, or run out of retries.
+     */
+    public function handle(): void
     {
         $brief = Brief::with('shots')->findOrFail($this->briefId);
-        $submitter = app(ShotVideoSubmitter::class);
 
-        $pollJobs = [];
+        $submits = $brief->shots
+            ->filter(fn (Shot $shot): bool => $shot->state->canTransitionTo(ShotState::GeneratingVideo))
+            ->map(fn (Shot $shot): SubmitVideoRenderJob => SubmitVideoRenderJob::forShot($shot))
+            ->values()
+            ->all();
 
-        foreach ($brief->shots as $shot) {
-            if (! $shot->state->canTransitionTo(ShotState::GeneratingVideo)) {
-                continue;
-            }
-
-            $poll = $submitter->submit($shot, $videoProvider);
-
-            if ($poll !== null) {
-                $pollJobs[] = $poll;
-            }
-        }
-
-        if (empty($pollJobs)) {
+        if ($submits === []) {
             $this->failWhenNoShotCanRender($brief);
 
             return;
         }
 
-        Bus::batch($pollJobs)
+        Bus::batch($submits)
             ->name("render-brief-{$brief->id}")
             ->then(new AdvanceBriefToAudioCallback($brief->id))
             ->catch(new FailBriefOnBatchFailureCallback($brief->id))
