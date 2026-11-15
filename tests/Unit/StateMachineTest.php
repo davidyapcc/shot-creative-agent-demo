@@ -205,4 +205,44 @@ class StateMachineTest extends TestCase
         $this->expectException(InvalidStateTransitionException::class);
         $shot->transitionTo(ShotState::GeneratingImage);
     }
+
+    public function test_a_stale_shot_does_not_overwrite_a_stop_that_failed_it(): void
+    {
+        // Arrange
+        $brief = Brief::create(['prompt' => 'A futuristic neon city in the rain', 'state' => BriefState::Keyframes]);
+        $shot = Shot::create([
+            'brief_id' => $brief->id,
+            'sequence' => 1,
+            'prompt' => 'Wide shot of cyberpunk neon alley',
+            'state' => ShotState::Pending,
+        ]);
+        Shot::query()->whereKey($shot->id)->update(['state' => ShotState::Failed->value]);
+
+        // Act
+        $isAdvanced = $shot->advanceIfAllowed(ShotState::GeneratingImage);
+
+        // Assert
+        $this->assertFalse($isAdvanced);
+        $this->assertSame(ShotState::Failed, $shot->state);
+        $this->assertSame(ShotState::Failed, Shot::findOrFail($shot->id)->state);
+    }
+
+    public function test_a_live_shot_advances_to_an_allowed_state(): void
+    {
+        // Arrange
+        $brief = Brief::create(['prompt' => 'A futuristic neon city in the rain', 'state' => BriefState::Keyframes]);
+        $shot = Shot::create([
+            'brief_id' => $brief->id,
+            'sequence' => 1,
+            'prompt' => 'Wide shot of cyberpunk neon alley',
+            'state' => ShotState::Pending,
+        ]);
+
+        // Act
+        $isAdvanced = $shot->advanceIfAllowed(ShotState::GeneratingImage);
+
+        // Assert
+        $this->assertTrue($isAdvanced);
+        $this->assertSame(ShotState::GeneratingImage, Shot::findOrFail($shot->id)->state);
+    }
 }

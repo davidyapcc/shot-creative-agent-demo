@@ -19,6 +19,7 @@ use App\Models\Brief;
 use App\Models\Judgement;
 use App\Models\Shot;
 use App\Services\Budget;
+use App\Services\PaidCall;
 use App\Services\ShotStepRetry;
 use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -311,7 +312,7 @@ class PollVideoRenderJobTest extends TestCase
             ));
 
         $job = new JudgeVideoJob($shot->id, $brief->id);
-        $job->handle($judge, app(ShotStepRetry::class), app(Budget::class));
+        $job->handle($judge, app(ShotStepRetry::class), app(PaidCall::class));
 
         $this->assertSame(ShotState::Done, $shot->refresh()->state);
 
@@ -357,7 +358,7 @@ class PollVideoRenderJobTest extends TestCase
             ));
 
         $job = new JudgeVideoJob($shot->id, $brief->id);
-        $job->handle($failingJudge, app(ShotStepRetry::class), app(Budget::class));
+        $job->handle($failingJudge, app(ShotStepRetry::class), app(PaidCall::class));
 
         $this->assertSame(ShotState::GeneratingVideo, $shot->refresh()->state);
         $this->assertSame(BriefState::Rendering, $brief->refresh()->state);

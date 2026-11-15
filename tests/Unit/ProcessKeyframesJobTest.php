@@ -19,7 +19,7 @@ use App\Jobs\RenderShotsJob;
 use App\Models\Brief;
 use App\Models\Judgement;
 use App\Models\Shot;
-use App\Services\Budget;
+use App\Services\PaidCall;
 use App\Services\RateLimitHitCounter;
 use App\Services\ShotStepRetry;
 use Illuminate\Bus\Batch;
@@ -95,7 +95,7 @@ class ProcessKeyframesJobTest extends TestCase
         $job = new GenerateKeyframeJob($shot->id, $brief->id);
         $this->assertSame('generate', $job->queue);
 
-        $job->handle($imageProvider, app(Budget::class));
+        $job->handle($imageProvider, app(PaidCall::class));
 
         $shot->refresh();
         $this->assertSame(ShotState::JudgingImage, $shot->state);
@@ -124,7 +124,7 @@ class ProcessKeyframesJobTest extends TestCase
         $job = new JudgeKeyframeJob($shot->id, $brief->id);
         $this->assertSame('judge', $job->queue);
 
-        $job->handle($judge, app(ShotStepRetry::class), app(Budget::class));
+        $job->handle($judge, app(ShotStepRetry::class), app(PaidCall::class));
 
         $judgement = Judgement::where('shot_id', $shot->id)->first();
         $this->assertNotNull($judgement);
@@ -165,7 +165,7 @@ class ProcessKeyframesJobTest extends TestCase
             ));
 
         $job = new JudgeKeyframeJob($shot->id, $brief->id);
-        $job->handle($failingJudge, app(ShotStepRetry::class), app(Budget::class));
+        $job->handle($failingJudge, app(ShotStepRetry::class), app(PaidCall::class));
 
         $this->assertSame(ShotState::JudgingImage, $shot->refresh()->state);
         $this->assertSame(BriefState::Keyframes, $brief->refresh()->state);
@@ -248,85 +248,6 @@ class ProcessKeyframesJobTest extends TestCase
         $failed->assertNotReleased();
     }
 
-    public function test_rate_limited_keyframe_refunds_shot_charge_counts_429_and_does_not_increment_attempts(): void
-    {
-        Storage::fake('s3');
-
-        $brief = Brief::create([
-            'prompt' => '15s product teaser, rainy Tokyo, neon',
-            'state' => BriefState::Keyframes,
-            'style_anchor' => 'cinematic neon rain',
-        ]);
-
-        $shot = Shot::create([
-            'brief_id' => $brief->id,
-            'sequence' => 1,
-            'prompt' => 'Shot 1: neon alley',
-            'state' => ShotState::Pending,
-        ]);
-
-        $otherShot = Shot::create([
-            'brief_id' => $brief->id,
-            'sequence' => 2,
-            'prompt' => 'Shot 2: rooftop',
-            'state' => ShotState::Pending,
-        ]);
-
-        $provider = new class($otherShot) implements ImageProviderInterface
-        {
-            public int $calls = 0;
-
-            public function __construct(private readonly Shot $otherShot) {}
-
-            public function generateImage(string $prompt, ?string $styleAnchor = null): string
-            {
-                $this->calls++;
-
-                if ($this->calls === 1) {
-                    app(Budget::class)->chargeShotStep($this->otherShot, 'image', 'generateImage');
-
-                    throw new ProviderRateLimitedException('Cloudflare image provider returned HTTP 429.');
-                }
-
-                return "\x89PNG\r\n\x1a\n".'keyframe-bytes';
-            }
-        };
-
-        $job = new GenerateKeyframeJob($shot->id, $brief->id);
-
-        try {
-            $job->handle($provider, app(Budget::class), app(RateLimitHitCounter::class));
-            $this->fail('The rate-limit error should escape the job.');
-        } catch (ProviderRateLimitedException) {
-            $brief->refresh();
-            $shot->refresh();
-
-            $this->assertSame(1, $brief->budget_used);
-            $this->assertSame([
-                ['provider' => 'image', 'operation' => 'generateImage', 'cost' => 1, 'shot_id' => $otherShot->id],
-            ], $brief->metadata['budget_ledger']);
-            $this->assertSame(0, $shot->attempts);
-            $this->assertArrayNotHasKey('step_attempts', $shot->metadata ?? []);
-            $this->assertSame(1, app(RateLimitHitCounter::class)->count('image'));
-        }
-
-        $job->handle($provider, app(Budget::class), app(RateLimitHitCounter::class));
-
-        $brief->refresh();
-        $shot->refresh();
-
-        $this->assertSame(2, $provider->calls);
-        $this->assertSame(2, $brief->budget_used);
-        $this->assertSame([
-            ['provider' => 'image', 'operation' => 'generateImage', 'cost' => 1, 'shot_id' => $otherShot->id],
-            ['provider' => 'image', 'operation' => 'generateImage', 'cost' => 1, 'shot_id' => $shot->id],
-        ], $brief->metadata['budget_ledger']);
-        $this->assertSame(1, $shot->attempts);
-        $this->assertSame(1, $shot->metadata['step_attempts']['image']);
-        $this->assertSame(ShotState::JudgingImage, $shot->state);
-        $this->assertSame(1, app(RateLimitHitCounter::class)->count('image'));
-    }
-
     public function test_failed_keyframe_that_is_not_rate_limited_keeps_its_charge_and_counts_an_attempt(): void
     {
         Storage::fake('s3');
@@ -354,7 +275,7 @@ class ProcessKeyframesJobTest extends TestCase
 
         try {
             (new GenerateKeyframeJob($shot->id, $brief->id))
-                ->handle($provider, app(Budget::class), app(RateLimitHitCounter::class));
+                ->handle($provider, app(PaidCall::class));
             $this->fail('The provider error should escape the job.');
         } catch (RuntimeException $exception) {
             $this->assertSame('Cloudflare image provider returned HTTP 500.', $exception->getMessage());

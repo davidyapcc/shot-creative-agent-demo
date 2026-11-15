@@ -27,6 +27,7 @@ use App\Jobs\ProcessKeyframesJob;
 use App\Models\Brief;
 use App\Models\Shot;
 use App\Services\Budget;
+use App\Services\PaidCall;
 use App\Services\ShotStepRetry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Bus;
@@ -50,7 +51,7 @@ class PipelineBroadcastsTest extends TestCase
         ]);
 
         $agent = app(AgentInterface::class);
-        (new PlanBriefJob($brief->id))->handle($agent, app(Budget::class));
+        (new PlanBriefJob($brief->id))->handle($agent, app(PaidCall::class));
 
         Event::assertDispatched(ShotUpdated::class, 3);
     }
@@ -74,7 +75,7 @@ class PipelineBroadcastsTest extends TestCase
         ]);
 
         $imageProvider = app(ImageProviderInterface::class);
-        (new GenerateKeyframeJob($shot->id, $brief->id))->handle($imageProvider, app(Budget::class));
+        (new GenerateKeyframeJob($shot->id, $brief->id))->handle($imageProvider, app(PaidCall::class));
 
         Event::assertDispatched(ShotUpdated::class, function (ShotUpdated $event) use ($shot): bool {
             return $event->shot->id === $shot->id
@@ -113,7 +114,7 @@ class PipelineBroadcastsTest extends TestCase
 
         Bus::fake([GenerateKeyframeJob::class, JudgeKeyframeJob::class]);
 
-        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(Budget::class));
+        (new JudgeKeyframeJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(PaidCall::class));
 
         Event::assertDispatched(
             JudgeVerdictRecorded::class,
@@ -200,7 +201,7 @@ class PipelineBroadcastsTest extends TestCase
 
         Bus::fake([PollVideoRenderJob::class]);
 
-        (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(Budget::class));
+        (new JudgeVideoJob($shot->id, $brief->id))->handle($judge, app(ShotStepRetry::class), app(PaidCall::class));
 
         Event::assertDispatched(
             JudgeVerdictRecorded::class,

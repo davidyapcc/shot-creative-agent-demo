@@ -23,7 +23,7 @@ use App\Jobs\ProcessKeyframesJob;
 use App\Jobs\RenderShotsJob;
 use App\Models\Brief;
 use App\Models\Shot;
-use App\Services\Budget;
+use App\Services\PaidCall;
 use Exception;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
@@ -107,7 +107,7 @@ class WalkingSkeletonTest extends TestCase
         // Stage 1: Planning
         $agent = app(AgentInterface::class);
         $planJob = new PlanBriefJob($brief->id);
-        $planJob->handle($agent, app(Budget::class));
+        $planJob->handle($agent, app(PaidCall::class));
 
         $brief->refresh();
         $this->assertSame(BriefState::Keyframes, $brief->state);
@@ -138,7 +138,7 @@ class WalkingSkeletonTest extends TestCase
 
         // Stage 4: Audio
         $audioJob = new GenerateAudioJob($brief->id);
-        $audioJob->handle(app(AudioProviderInterface::class), app(Budget::class));
+        $audioJob->handle(app(AudioProviderInterface::class), app(PaidCall::class));
 
         $brief->refresh();
         $this->assertSame(BriefState::Muxing, $brief->state);
