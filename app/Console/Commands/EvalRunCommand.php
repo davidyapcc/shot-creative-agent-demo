@@ -48,6 +48,7 @@ class EvalRunCommand extends Command
             $cap = $this->cap(count($clips));
             $judge = $this->judge($judges, $driver, $clips);
             GoldenSet::seed($clips);
+            GoldenSet::assertPresent($clips);
         } catch (RuntimeException|InvalidArgumentException $exception) {
             // Setup failures stop the command before an eval run exists or anything is charged.
             $this->error($exception->getMessage());

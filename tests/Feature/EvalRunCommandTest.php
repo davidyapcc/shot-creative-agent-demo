@@ -365,6 +365,119 @@ class EvalRunCommandTest extends TestCase
         );
     }
 
+    public function test_missing_recorded_clips_fail_before_seeding_judging_or_charging(): void
+    {
+        Storage::fake('s3');
+        Process::fake();
+
+        $judgeCalls = 0;
+        $this->app->instance(JudgeFactory::class, $this->stubJudges(new class($judgeCalls) implements JudgeInterface
+        {
+            public function __construct(private int &$calls) {}
+
+            public function judgeImage(string $imagePath, string $prompt, ?string $styleAnchor = null): JudgementResult
+            {
+                throw new RuntimeException('Images are not judged in evals.');
+            }
+
+            public function judgeVideo(string $videoPath, string $prompt, ?string $styleAnchor = null): JudgementResult
+            {
+                $this->calls++;
+
+                return new JudgementResult(['prompt_adherence' => 5]);
+            }
+        }));
+
+        $path = base_path('evals/golden.json');
+        $original = file_get_contents($path);
+        $report = base_path('evals/REPORT.md');
+        $previousReport = is_file($report) ? file_get_contents($report) : null;
+        file_put_contents($path, json_encode([
+            [
+                'id' => 'veo-steady-street',
+                'path' => 'evals/golden/veo-steady-street.mp4',
+                'prompt' => 'A steady street.',
+                'verdict' => 'pass',
+                'tags' => [],
+                'recorded' => true,
+            ],
+            [
+                'id' => 'veo-warp-car',
+                'path' => 'evals/golden/veo-warp-car.mp4',
+                'prompt' => 'A car warps.',
+                'verdict' => 'fail',
+                'tags' => ['object_warp'],
+                'recorded' => true,
+            ],
+        ]));
+
+        try {
+            $this->artisan('eval:run', [
+                '--judge' => 'stub',
+                '--set' => 'golden',
+            ])
+                ->expectsOutputToContain('veo-steady-street (evals/golden/veo-steady-street.mp4), veo-warp-car (evals/golden/veo-warp-car.mp4)')
+                ->assertFailed();
+
+            Storage::disk('s3')->assertMissing('evals/golden/veo-steady-street.mp4');
+            Storage::disk('s3')->assertMissing('evals/golden/veo-warp-car.mp4');
+            Process::assertNothingRan();
+            $this->assertSame(0, $judgeCalls);
+            $this->assertSame(0, EvalRun::query()->count());
+        } finally {
+            file_put_contents($path, (string) $original);
+            $this->restoreReport($report, $previousReport);
+        }
+    }
+
+    public function test_present_recorded_clips_are_judged_without_overwriting_their_bytes(): void
+    {
+        Storage::fake('s3');
+        Storage::disk('s3')->put('evals/golden/veo-steady-street.mp4', 'recorded-veo-bytes');
+
+        $this->app->instance(JudgeFactory::class, $this->stubJudges(new class implements JudgeInterface
+        {
+            public function judgeImage(string $imagePath, string $prompt, ?string $styleAnchor = null): JudgementResult
+            {
+                throw new RuntimeException('Images are not judged in evals.');
+            }
+
+            public function judgeVideo(string $videoPath, string $prompt, ?string $styleAnchor = null): JudgementResult
+            {
+                return new JudgementResult(['prompt_adherence' => 5]);
+            }
+        }));
+
+        $goldenPath = base_path('evals/golden.json');
+        $originalGolden = file_get_contents($goldenPath);
+        $report = base_path('evals/REPORT.md');
+        $previousReport = is_file($report) ? file_get_contents($report) : null;
+
+        file_put_contents($goldenPath, json_encode([[
+            'id' => 'veo-steady-street',
+            'path' => 'evals/golden/veo-steady-street.mp4',
+            'prompt' => 'A steady street.',
+            'verdict' => 'pass',
+            'tags' => [],
+            'recorded' => true,
+        ]]));
+
+        try {
+            $this->artisan('eval:run', [
+                '--judge' => 'stub',
+                '--set' => 'golden',
+            ])->assertSuccessful();
+
+            $this->assertSame('recorded-veo-bytes', Storage::disk('s3')->get('evals/golden/veo-steady-street.mp4'));
+            $run = EvalRun::query()->sole();
+            $this->assertSame(EvalRunStatus::Complete, $run->status);
+            $this->assertCount(1, $run->ledger);
+        } finally {
+            file_put_contents($goldenPath, (string) $originalGolden);
+            $this->restoreReport($report, $previousReport);
+        }
+    }
+
     public function test_diff_prints_both_configs_metric_deltas_and_verdict_changes(): void
     {
         $first = $this->storedRun('replay', 'replay', EvalRunStatus::Complete, [

@@ -54,4 +54,11 @@ return [
         'tts_model' => env('ELEVENLABS_TTS_MODEL', 'eleven_v4_turbo'),
     ],
 
+    'vertex' => [
+        'project_id' => env('VERTEX_PROJECT_ID'),
+        'location' => env('VERTEX_LOCATION') ?: 'us-central1',
+        'veo_model' => env('VERTEX_VEO_MODEL') ?: 'veo-3.1-fast-generate-001',
+        'credentials' => env('GOOGLE_APPLICATION_CREDENTIALS'),
+    ],
+
 ];

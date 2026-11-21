@@ -25,6 +25,7 @@ use App\Services\Providers\FfmpegMotionVideoProvider;
 use App\Services\Providers\ReplayAudioProvider;
 use App\Services\Providers\ReplayImageProvider;
 use App\Services\Providers\ReplayVideoProvider;
+use App\Services\Providers\VertexVeoVideoProvider;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
@@ -68,6 +69,7 @@ class AppServiceProvider extends ServiceProvider
                     pendingPolls: (int) config('creative.replay_pending_polls', 1),
                 ),
                 'ffmpeg_motion' => new FfmpegMotionVideoProvider,
+                'veo' => $this->vertexVeoVideoProvider(),
                 default => throw new InvalidArgumentException("Unsupported video provider [{$provider}]."),
             };
         });
@@ -164,6 +166,21 @@ class AppServiceProvider extends ServiceProvider
             apiKey: is_string($apiKey) ? $apiKey : '',
             voiceId: is_string($voiceId) ? $voiceId : '',
             ttsModel: is_string($ttsModel) ? $ttsModel : '',
+        );
+    }
+
+    private function vertexVeoVideoProvider(): VertexVeoVideoProvider
+    {
+        $projectId = config('services.vertex.project_id');
+        $location = config('services.vertex.location');
+        $model = config('services.vertex.veo_model');
+        $credentials = config('services.vertex.credentials');
+
+        return new VertexVeoVideoProvider(
+            projectId: is_string($projectId) ? $projectId : '',
+            location: is_string($location) ? $location : '',
+            model: is_string($model) ? $model : '',
+            credentials: is_string($credentials) ? $credentials : '',
         );
     }
 

@@ -36,18 +36,38 @@ class GoldenSet
     }
 
     /**
-     * Write any missing clip under the existing bucket. Safe to call again.
+     * Write any missing placeholder clip under the existing bucket. Safe to call again.
      *
      * @param  list<GoldenClip>  $clips
      */
     public static function seed(array $clips): void
     {
         foreach ($clips as $index => $clip) {
-            if (Storage::disk('s3')->exists($clip->path)) {
+            if ($clip->recorded || Storage::disk('s3')->exists($clip->path)) {
                 continue;
             }
 
             Storage::disk('s3')->put($clip->path, self::render($index));
+        }
+    }
+
+    /**
+     * Stop before judging if any clip is missing on S3.
+     *
+     * @param  list<GoldenClip>  $clips
+     */
+    public static function assertPresent(array $clips): void
+    {
+        $missing = [];
+
+        foreach ($clips as $clip) {
+            if (! Storage::disk('s3')->exists($clip->path)) {
+                $missing[] = "{$clip->id} ({$clip->path})";
+            }
+        }
+
+        if ($missing !== []) {
+            throw new RuntimeException('Missing golden clips on s3: '.implode(', ', $missing).'.');
         }
     }
 
