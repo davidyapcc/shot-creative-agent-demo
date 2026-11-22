@@ -371,28 +371,9 @@ class EvalRunCommandTest extends TestCase
         Process::fake();
 
         $judgeCalls = 0;
-        $this->app->instance(JudgeFactory::class, $this->stubJudges(new class($judgeCalls) implements JudgeInterface
-        {
-            public function __construct(private int &$calls) {}
+        $this->app->instance(JudgeFactory::class, $this->stubJudges($this->passingJudge($judgeCalls)));
 
-            public function judgeImage(string $imagePath, string $prompt, ?string $styleAnchor = null): JudgementResult
-            {
-                throw new RuntimeException('Images are not judged in evals.');
-            }
-
-            public function judgeVideo(string $videoPath, string $prompt, ?string $styleAnchor = null): JudgementResult
-            {
-                $this->calls++;
-
-                return new JudgementResult(['prompt_adherence' => 5]);
-            }
-        }));
-
-        $path = base_path('evals/golden.json');
-        $original = file_get_contents($path);
-        $report = base_path('evals/REPORT.md');
-        $previousReport = is_file($report) ? file_get_contents($report) : null;
-        file_put_contents($path, json_encode([
+        $this->withGoldenSet([
             [
                 'id' => 'veo-steady-street',
                 'path' => 'evals/golden/veo-steady-street.mp4',
@@ -409,9 +390,7 @@ class EvalRunCommandTest extends TestCase
                 'tags' => ['object_warp'],
                 'recorded' => true,
             ],
-        ]));
-
-        try {
+        ], function () use (&$judgeCalls): void {
             $this->artisan('eval:run', [
                 '--judge' => 'stub',
                 '--set' => 'golden',
@@ -424,10 +403,48 @@ class EvalRunCommandTest extends TestCase
             Process::assertNothingRan();
             $this->assertSame(0, $judgeCalls);
             $this->assertSame(0, EvalRun::query()->count());
-        } finally {
-            file_put_contents($path, (string) $original);
-            $this->restoreReport($report, $previousReport);
-        }
+        });
+    }
+
+    public function test_missing_recorded_clip_in_a_mixed_set_fails_before_seeding_placeholders(): void
+    {
+        Storage::fake('s3');
+        Process::fake();
+
+        $judgeCalls = 0;
+        $this->app->instance(JudgeFactory::class, $this->stubJudges($this->passingJudge($judgeCalls)));
+
+        $this->withGoldenSet([
+            [
+                'id' => 'placeholder-street',
+                'path' => 'evals/golden/placeholder-street.mp4',
+                'prompt' => 'A placeholder street.',
+                'verdict' => 'pass',
+                'tags' => [],
+                'recorded' => false,
+            ],
+            [
+                'id' => 'veo-steady-street',
+                'path' => 'evals/golden/veo-steady-street.mp4',
+                'prompt' => 'A steady street.',
+                'verdict' => 'pass',
+                'tags' => [],
+                'recorded' => true,
+            ],
+        ], function () use (&$judgeCalls): void {
+            $this->artisan('eval:run', [
+                '--judge' => 'stub',
+                '--set' => 'golden',
+            ])
+                ->expectsOutputToContain('veo-steady-street (evals/golden/veo-steady-street.mp4)')
+                ->assertFailed();
+
+            Storage::disk('s3')->assertMissing('evals/golden/placeholder-street.mp4');
+            Storage::disk('s3')->assertMissing('evals/golden/veo-steady-street.mp4');
+            Process::assertNothingRan();
+            $this->assertSame(0, $judgeCalls);
+            $this->assertSame(0, EvalRun::query()->count());
+        });
     }
 
     public function test_present_recorded_clips_are_judged_without_overwriting_their_bytes(): void
@@ -435,34 +452,16 @@ class EvalRunCommandTest extends TestCase
         Storage::fake('s3');
         Storage::disk('s3')->put('evals/golden/veo-steady-street.mp4', 'recorded-veo-bytes');
 
-        $this->app->instance(JudgeFactory::class, $this->stubJudges(new class implements JudgeInterface
-        {
-            public function judgeImage(string $imagePath, string $prompt, ?string $styleAnchor = null): JudgementResult
-            {
-                throw new RuntimeException('Images are not judged in evals.');
-            }
+        $this->app->instance(JudgeFactory::class, $this->stubJudges($this->passingJudge()));
 
-            public function judgeVideo(string $videoPath, string $prompt, ?string $styleAnchor = null): JudgementResult
-            {
-                return new JudgementResult(['prompt_adherence' => 5]);
-            }
-        }));
-
-        $goldenPath = base_path('evals/golden.json');
-        $originalGolden = file_get_contents($goldenPath);
-        $report = base_path('evals/REPORT.md');
-        $previousReport = is_file($report) ? file_get_contents($report) : null;
-
-        file_put_contents($goldenPath, json_encode([[
+        $this->withGoldenSet([[
             'id' => 'veo-steady-street',
             'path' => 'evals/golden/veo-steady-street.mp4',
             'prompt' => 'A steady street.',
             'verdict' => 'pass',
             'tags' => [],
             'recorded' => true,
-        ]]));
-
-        try {
+        ]], function (): void {
             $this->artisan('eval:run', [
                 '--judge' => 'stub',
                 '--set' => 'golden',
@@ -472,10 +471,7 @@ class EvalRunCommandTest extends TestCase
             $run = EvalRun::query()->sole();
             $this->assertSame(EvalRunStatus::Complete, $run->status);
             $this->assertCount(1, $run->ledger);
-        } finally {
-            file_put_contents($goldenPath, (string) $originalGolden);
-            $this->restoreReport($report, $previousReport);
-        }
+        });
     }
 
     public function test_diff_prints_both_configs_metric_deltas_and_verdict_changes(): void
@@ -587,6 +583,47 @@ class EvalRunCommandTest extends TestCase
             'results' => $results,
             'ledger' => [],
         ]);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $clips
+     */
+    private function withGoldenSet(array $clips, callable $callback): void
+    {
+        $goldenPath = base_path('evals/golden.json');
+        $originalGolden = file_get_contents($goldenPath);
+        $report = base_path('evals/REPORT.md');
+        $previousReport = is_file($report) ? file_get_contents($report) : null;
+        file_put_contents($goldenPath, json_encode($clips));
+
+        try {
+            $callback();
+        } finally {
+            file_put_contents($goldenPath, (string) $originalGolden);
+            $this->restoreReport($report, $previousReport);
+        }
+    }
+
+    private function passingJudge(?int &$calls = null): JudgeInterface
+    {
+        return new class($calls) implements JudgeInterface
+        {
+            public function __construct(private ?int &$calls) {}
+
+            public function judgeImage(string $imagePath, string $prompt, ?string $styleAnchor = null): JudgementResult
+            {
+                throw new RuntimeException('Images are not judged in evals.');
+            }
+
+            public function judgeVideo(string $videoPath, string $prompt, ?string $styleAnchor = null): JudgementResult
+            {
+                if ($this->calls !== null) {
+                    $this->calls++;
+                }
+
+                return new JudgementResult(['prompt_adherence' => 5]);
+            }
+        };
     }
 
     private function restoreReport(string $report, string|false|null $previous): void

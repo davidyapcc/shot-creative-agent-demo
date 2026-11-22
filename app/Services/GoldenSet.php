@@ -36,6 +36,19 @@ class GoldenSet
     }
 
     /**
+     * Stop before seeding placeholders if any recorded clip is missing on S3.
+     *
+     * @param  list<GoldenClip>  $clips
+     */
+    public static function assertRecordedPresent(array $clips): void
+    {
+        self::assertPresent(array_values(array_filter(
+            $clips,
+            fn (GoldenClip $clip): bool => $clip->recorded,
+        )));
+    }
+
+    /**
      * Write any missing placeholder clip under the existing bucket. Safe to call again.
      *
      * @param  list<GoldenClip>  $clips

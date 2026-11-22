@@ -47,6 +47,7 @@ class EvalRunCommand extends Command
             $clips = GoldenSet::load(base_path('evals/golden.json'));
             $cap = $this->cap(count($clips));
             $judge = $this->judge($judges, $driver, $clips);
+            GoldenSet::assertRecordedPresent($clips);
             GoldenSet::seed($clips);
             GoldenSet::assertPresent($clips);
         } catch (RuntimeException|InvalidArgumentException $exception) {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Judge;
 
+use App\Support\ImageMime;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
@@ -30,19 +31,7 @@ class JudgeMedia
 
     public function imageMime(string $bytes, string $path): string
     {
-        if (str_starts_with($bytes, "\x89PNG\r\n\x1a\n")) {
-            return 'image/png';
-        }
-
-        if (str_starts_with($bytes, "\xFF\xD8\xFF")) {
-            return 'image/jpeg';
-        }
-
-        return match (strtolower(pathinfo($path, PATHINFO_EXTENSION))) {
-            'jpg', 'jpeg' => 'image/jpeg',
-            'webp' => 'image/webp',
-            default => 'image/png',
-        };
+        return ImageMime::detect($bytes, $path);
     }
 
     /**

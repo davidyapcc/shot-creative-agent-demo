@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Services\Providers;
 
-use App\Exceptions\ProviderRateLimitedException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use InvalidArgumentException;
@@ -90,22 +89,14 @@ class VertexAccessToken
                 'assertion' => $this->signedJwt(),
             ]);
 
-        if ($response->status() === 429) {
-            throw new ProviderRateLimitedException('Google OAuth token endpoint returned HTTP 429.');
-        }
-
-        if (! $response->successful()) {
-            throw new RuntimeException("Google OAuth token endpoint returned HTTP {$response->status()}.");
-        }
-
-        $payload = $response->json();
-        $accessToken = is_array($payload) ? ($payload['access_token'] ?? null) : null;
+        $payload = VertexHttp::decodeJson($response, 'Google OAuth token endpoint');
+        $accessToken = $payload['access_token'] ?? null;
 
         if (! is_string($accessToken) || $accessToken === '') {
             throw new RuntimeException('Google OAuth token response is missing access_token.');
         }
 
-        $expiresIn = is_array($payload) && is_numeric($payload['expires_in'] ?? null)
+        $expiresIn = is_numeric($payload['expires_in'] ?? null)
             ? (int) $payload['expires_in']
             : self::JWT_TTL_SECONDS;
 
@@ -159,20 +150,26 @@ class VertexAccessToken
 
     private static function readRawJson(string $credentials): string
     {
+        if (is_file($credentials)) {
+            $contents = is_readable($credentials) ? file_get_contents($credentials) : false;
+
+            if (! is_string($contents)) {
+                throw new InvalidArgumentException("Google credentials file not found at [{$credentials}].");
+            }
+
+            return $contents;
+        }
+
         if (str_starts_with($credentials, '{')) {
             return $credentials;
         }
 
-        if (! is_file($credentials) || ! is_readable($credentials)) {
+        if (str_contains($credentials, '/') || str_contains($credentials, '\\') || str_ends_with(strtolower($credentials), '.json')) {
             throw new InvalidArgumentException("Google credentials file not found at [{$credentials}].");
         }
 
-        $contents = file_get_contents($credentials);
-
-        if (! is_string($contents)) {
-            throw new InvalidArgumentException("Google credentials file not found at [{$credentials}].");
-        }
-
-        return $contents;
+        throw new InvalidArgumentException(
+            'GOOGLE_APPLICATION_CREDENTIALS must contain valid service account JSON with client_email and private_key.',
+        );
     }
 }

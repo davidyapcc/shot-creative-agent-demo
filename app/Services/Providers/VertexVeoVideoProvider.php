@@ -6,7 +6,7 @@ namespace App\Services\Providers;
 
 use App\Contracts\VideoProviderInterface;
 use App\DTOs\VideoRenderResult;
-use App\Exceptions\ProviderRateLimitedException;
+use App\Support\ImageMime;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
@@ -49,7 +49,7 @@ class VertexVeoVideoProvider implements VideoProviderInterface
                     'prompt' => $prompt,
                     'image' => [
                         'bytesBase64Encoded' => base64_encode($imageBytes),
-                        'mimeType' => $this->imageMime($imageBytes, $keyframePath),
+                        'mimeType' => ImageMime::detect($imageBytes, $keyframePath),
                     ],
                 ],
             ],
@@ -160,21 +160,7 @@ class VertexVeoVideoProvider implements VideoProviderInterface
             ->timeout(self::TIMEOUT_SECONDS)
             ->post($url, $payload);
 
-        if ($response->status() === 429) {
-            throw new ProviderRateLimitedException('Vertex Veo returned HTTP 429.');
-        }
-
-        if (! $response->successful()) {
-            throw new RuntimeException("Vertex Veo returned HTTP {$response->status()}.");
-        }
-
-        $json = $response->json();
-
-        if (! is_array($json)) {
-            throw new RuntimeException('Vertex Veo returned invalid JSON.');
-        }
-
-        return $json;
+        return VertexHttp::decodeJson($response, 'Vertex Veo');
     }
 
     private function modelEndpoint(): string
@@ -202,27 +188,6 @@ class VertexVeoVideoProvider implements VideoProviderInterface
         }
 
         return $bytes;
-    }
-
-    private function imageMime(string $bytes, string $path): string
-    {
-        if (str_starts_with($bytes, "\x89PNG\r\n\x1a\n")) {
-            return 'image/png';
-        }
-
-        if (str_starts_with($bytes, "\xFF\xD8\xFF")) {
-            return 'image/jpeg';
-        }
-
-        if (str_starts_with($bytes, 'RIFF') && substr($bytes, 8, 4) === 'WEBP') {
-            return 'image/webp';
-        }
-
-        return match (strtolower(pathinfo($path, PATHINFO_EXTENSION))) {
-            'jpg', 'jpeg' => 'image/jpeg',
-            'webp' => 'image/webp',
-            default => 'image/png',
-        };
     }
 
     private static function requireNonEmpty(string $value, string $message): string

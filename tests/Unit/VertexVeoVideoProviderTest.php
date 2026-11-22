@@ -149,6 +149,11 @@ class VertexVeoVideoProviderTest extends TestCase
                 'expected' => 'GOOGLE_APPLICATION_CREDENTIALS must contain valid service account JSON with client_email and private_key.',
                 'secret' => null,
             ],
+            'non-json string' => [
+                'credentials' => 'not-json-at-all',
+                'expected' => 'GOOGLE_APPLICATION_CREDENTIALS must contain valid service account JSON with client_email and private_key.',
+                'secret' => null,
+            ],
             'missing client_email' => [
                 'credentials' => json_encode(['private_key' => $this->privateKey()], JSON_THROW_ON_ERROR),
                 'expected' => 'GOOGLE_APPLICATION_CREDENTIALS must contain valid service account JSON with client_email and private_key.',
