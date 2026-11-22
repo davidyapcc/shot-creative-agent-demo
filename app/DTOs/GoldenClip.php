@@ -22,6 +22,7 @@ class GoldenClip
         public readonly string $prompt,
         public readonly JudgementVerdict $verdict,
         public readonly array $tags,
+        public readonly bool $recorded = false,
     ) {}
 
     public static function fromArray(mixed $entry): self
@@ -43,12 +44,19 @@ class GoldenClip
             throw new RuntimeException("Golden clip {$id} is missing a path or prompt.");
         }
 
+        $recorded = $entry['recorded'] ?? false;
+
+        if (! is_bool($recorded)) {
+            throw new RuntimeException("Golden clip {$id} has a non-boolean recorded flag.");
+        }
+
         return new self(
             id: $id,
             path: $path,
             prompt: $prompt,
             verdict: self::verdict($id, $entry['verdict'] ?? null),
             tags: self::tags($id, $entry['tags'] ?? null),
+            recorded: $recorded,
         );
     }
 
